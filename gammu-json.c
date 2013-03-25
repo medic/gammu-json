@@ -5,6 +5,12 @@
 #include <gammu.h>
 
 /**
+ * @name sms_iterate_fn_t
+ */
+typedef int (*sms_iterate_fn_t)(GSM_MultiSMSMessage *, void *);
+
+
+/**
  * @name gammu_state_t
  */
 typedef struct gammu_state {
@@ -130,12 +136,12 @@ void gammu_free(gammu_state_t *s) {
   free(s);
 }
 
-
 /**
- * @name retrieve_sms_all:
+ * @name for_each_sms_message:
  */
-int retrieve_sms_all(gammu_state_t *s) {
-
+int for_each_sms_message(gammu_state_t *s,
+			 sms_iterate_fn_t fn, void *x) {
+  int rv = FALSE;
   int start = TRUE;
 
   GSM_MultiSMSMessage *sms =
@@ -148,64 +154,81 @@ int retrieve_sms_all(gammu_state_t *s) {
     int err = GSM_GetNextSMS(s->sm, sms, start);
 
     if (err == ERR_EMPTY) {
+      rv = TRUE;
       break;
     }
 
     if (err != ERR_NONE) {
-      return 2;
+      break;
     }
 
     if (!start) {
       printf(", ");
     }
 
-    int i;
+    rv = TRUE;
     start = FALSE;
-
-    for (i = 0; i < sms->Number; i++) {
-
-      printf("{");
-
-      printf("\"folder\": %d, ", sms->SMS[i].Folder);
-      printf("\"location\": %d, ", sms->SMS[i].Location);
-
-      char *from = make_json_utf8(sms->SMS[i].Number);
-      printf("\"from\": \"%s\", ", from);
-      free(from);
-
-      char *smsc = make_json_utf8(sms->SMS[i].SMSC.Number);
-      printf("\"smsc\": \"%s\", ", smsc);
-      free(smsc);
-
-      printf("\"segment\": %d, ", sms->SMS[i].UDH.PartNumber);
-      printf("\"total-segments\": %d, ", sms->SMS[i].UDH.AllParts);
-
-      if (sms->SMS[i].UDH.Type != UDH_NoUDH) {
-        if (sms->SMS[i].UDH.ID16bit != -1) {
-          printf("\"udh\": %d, ", sms->SMS[i].UDH.ID16bit);
-        } else {
-          printf("\"udh\": %d, ", sms->SMS[i].UDH.ID8bit);
-        }
-      }
-
-      char *text = make_json_utf8(sms->SMS[i].Text);
-      printf("\"content\": \"%s\"", text);
-      free(text);
-
-      printf("}");
+    
+    if (!fn(sms, x)) {
+      break;
     }
-
-  }
-
-  printf("]\n");
-
-  if (GSM_TerminateConnection(s->sm) != ERR_NONE) {
-    return 127;
   }
 
   free(sms);
+  return rv;
+}
 
-  return 0;
+int print_sms_json_utf8(GSM_MultiSMSMessage *sms) {
+
+  for (int i = 0; i < sms->Number; i++) {
+
+    printf("{");
+
+    printf("\"folder\": %d, ", sms->SMS[i].Folder);
+    printf("\"location\": %d, ", sms->SMS[i].Location);
+
+    char *from = make_json_utf8(sms->SMS[i].Number);
+    printf("\"from\": \"%s\", ", from);
+    free(from);
+
+    char *smsc = make_json_utf8(sms->SMS[i].SMSC.Number);
+    printf("\"smsc\": \"%s\", ", smsc);
+    free(smsc);
+
+    printf("\"segment\": %d, ", sms->SMS[i].UDH.PartNumber);
+    printf("\"total-segments\": %d, ", sms->SMS[i].UDH.AllParts);
+
+    if (sms->SMS[i].UDH.Type != UDH_NoUDH) {
+      if (sms->SMS[i].UDH.ID16bit != -1) {
+        printf("\"udh\": %d, ", sms->SMS[i].UDH.ID16bit);
+      } else {
+        printf("\"udh\": %d, ", sms->SMS[i].UDH.ID8bit);
+      }
+    }
+
+    char *text = make_json_utf8(sms->SMS[i].Text);
+    printf("\"content\": \"%s\"", text);
+    free(text);
+
+    printf("}");
+  }
+
+  return TRUE;
+}
+
+/**
+ * @name print_all_sms_json_utf8:
+ */
+int print_all_sms_json_utf8(gammu_state_t *s) {
+
+  printf("[");
+
+  int rv = for_each_sms_message(
+    s, (sms_iterate_fn_t) print_sms_json_utf8, NULL
+  );
+
+  printf("]\n");
+  return rv;
 }
 
 /**
@@ -235,12 +258,10 @@ int main(int argc, char *argv[]) {
   }
 
   if (strcmp(argv[1], "retrieve") == 0) {
-    retrieve_sms_all(s);
-    goto cleanup;
+    print_all_sms_json_utf8(s);
   }
 
-  cleanup:
-    gammu_free(s);
-    return rv;
+  gammu_free(s);
+  return rv;
 }
 
