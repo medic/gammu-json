@@ -4,11 +4,6 @@
 #include <string.h>
 #include <gammu.h>
 
-/**
- * @name sms_iterate_fn_t
- */
-typedef int (*sms_iterate_fn_t)(GSM_MultiSMSMessage *, void *);
-
 
 /**
  * @name gammu_state_t
@@ -20,6 +15,17 @@ typedef struct gammu_state {
 
 } gammu_state_t;
 
+/**
+ * @name message_t
+ */
+typedef GSM_MultiSMSMessage message_t;
+
+/**
+ * @name message_iterate_fn_t
+ */
+typedef int (*message_iterate_fn_t)(
+  gammu_state_t *, message_t *, int, void *
+);
 
 /**
  * @name malloc_and_zero
@@ -33,9 +39,9 @@ static void *malloc_and_zero(int size) {
 }
 
 /**
- * @name make_json_utf8:
+ * @name encode_json_utf8:
  */
-char *make_json_utf8(const unsigned char *ucs2_str) {
+char *encode_json_utf8(const unsigned char *ucs2_str) {
 
   int i, j = 0;
   int ul = UnicodeLength(ucs2_str);
@@ -137,17 +143,15 @@ void gammu_free(gammu_state_t *s) {
 }
 
 /**
- * @name for_each_sms_message:
+ * @name for_each_message:
  */
-int for_each_sms_message(gammu_state_t *s,
-			 sms_iterate_fn_t fn, void *x) {
+int for_each_message(gammu_state_t *s,
+                     message_iterate_fn_t fn, void *x) {
   int rv = FALSE;
   int start = TRUE;
 
-  GSM_MultiSMSMessage *sms =
-    (GSM_MultiSMSMessage *) malloc_and_zero(sizeof(*sms));
-
-  printf("[");
+  message_t *sms =
+    (message_t *) malloc_and_zero(sizeof(*sms));
 
   for (;;) {
 
@@ -162,14 +166,10 @@ int for_each_sms_message(gammu_state_t *s,
       break;
     }
 
-    if (!start) {
-      printf(", ");
-    }
-
     rv = TRUE;
     start = FALSE;
     
-    if (!fn(sms, x)) {
+    if (!fn(s, sms, start, x)) {
       break;
     }
   }
@@ -178,7 +178,14 @@ int for_each_sms_message(gammu_state_t *s,
   return rv;
 }
 
-int print_sms_json_utf8(GSM_MultiSMSMessage *sms) {
+/**
+ * @name print_message_json_utf8:
+ */
+int print_message_json_utf8(gammu_state_t *s, message_t *sms, int first) {
+
+  if (!first) {
+    printf(", ");
+  }
 
   for (int i = 0; i < sms->Number; i++) {
 
@@ -187,11 +194,11 @@ int print_sms_json_utf8(GSM_MultiSMSMessage *sms) {
     printf("\"folder\": %d, ", sms->SMS[i].Folder);
     printf("\"location\": %d, ", sms->SMS[i].Location);
 
-    char *from = make_json_utf8(sms->SMS[i].Number);
+    char *from = encode_json_utf8(sms->SMS[i].Number);
     printf("\"from\": \"%s\", ", from);
     free(from);
 
-    char *smsc = make_json_utf8(sms->SMS[i].SMSC.Number);
+    char *smsc = encode_json_utf8(sms->SMS[i].SMSC.Number);
     printf("\"smsc\": \"%s\", ", smsc);
     free(smsc);
 
@@ -206,7 +213,7 @@ int print_sms_json_utf8(GSM_MultiSMSMessage *sms) {
       }
     }
 
-    char *text = make_json_utf8(sms->SMS[i].Text);
+    char *text = encode_json_utf8(sms->SMS[i].Text);
     printf("\"content\": \"%s\"", text);
     free(text);
 
@@ -217,17 +224,43 @@ int print_sms_json_utf8(GSM_MultiSMSMessage *sms) {
 }
 
 /**
- * @name print_all_sms_json_utf8:
+ * @name print_messages_json_utf8:
  */
-int print_all_sms_json_utf8(gammu_state_t *s) {
+int print_messages_json_utf8(gammu_state_t *s) {
 
   printf("[");
 
-  int rv = for_each_sms_message(
-    s, (sms_iterate_fn_t) print_sms_json_utf8, NULL
+  int rv = for_each_message(
+    s, (message_iterate_fn_t) print_message_json_utf8, NULL
   );
 
   printf("]\n");
+  return rv;
+}
+
+/**
+ * @name delete_single_message:
+ */
+int delete_single_message(gammu_state_t *s, message_t *sms) {
+
+  for (int i = 0; i < sms->Number; i++) {
+    if ((s->errno = GSM_DeleteSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
+      return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
+/**
+ * @name delete_selected_messages:
+ */
+int delete_selected_messages(gammu_state_t *s) {
+
+  int rv = for_each_message(
+    s, (message_iterate_fn_t) delete_single_message, NULL
+  );
+
   return rv;
 }
 
@@ -245,7 +278,7 @@ int usage(int argc, char *argv[]) {
  */
 int main(int argc, char *argv[]) {
 
-  int rv = 111;
+  int rv = 0;
 
   if (argc < 2) {
     return usage(argc, argv);
@@ -254,14 +287,32 @@ int main(int argc, char *argv[]) {
   gammu_state_t *s = gammu_create(NULL);
 
   if (!s) {
-    return 1;
+    rv = 1;
+    goto cleanup;
   }
 
+  /* Retrieve messages as JSON */
   if (strcmp(argv[1], "retrieve") == 0) {
-    print_all_sms_json_utf8(s);
+
+    if (!print_messages_json_utf8(s)) {
+      rv = 2;
+    }
+
+    goto cleanup;
   }
 
-  gammu_free(s);
-  return rv;
+  /* Delete specified messages (or all) */
+  if (strcmp(argv[1], "delete") == 0) {
+
+    if (!delete_selected_messages(s)) {
+      rv = 3;
+    }
+
+    goto cleanup;
+  }
+
+  cleanup:
+    gammu_free(s);
+    return rv;
 }
 
