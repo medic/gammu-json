@@ -5,6 +5,17 @@
 #include <gammu.h>
 
 /**
+ * @name gammu_state_t
+ */
+typedef struct gammu_state {
+
+  int errno;
+  GSM_StateMachine *sm;
+
+} gammu_state_t;
+
+
+/**
  * @name malloc_and_zero
  */
 static void *malloc_and_zero(int size) {
@@ -63,7 +74,8 @@ char *make_json_utf8(const unsigned char *ucs2_str) {
   b[j++] = '\0';
   b[j++] = '\0';
 
-  char *rv = (char *) malloc_and_zero(UnicodeLength(b) + 1);
+  char *rv =
+    (char *) malloc_and_zero(UnicodeLength(b) + 1);
 
   EncodeUTF8(rv, b);
   free(b);
@@ -72,52 +84,82 @@ char *make_json_utf8(const unsigned char *ucs2_str) {
 }
 
 /**
- * @name retrieve_sms_all:
+ * @name gammu_create:
  */
-int retrieve_sms_all() {
+gammu_state_t *gammu_create(const char *config_path) {
+
+  gammu_state_t *s =
+    (gammu_state_t *) malloc_and_zero(sizeof(*s));
+
+  if (!s) {
+    return NULL;
+  }
 
   INI_Section *ini;
   GSM_InitLocales(NULL);
 
-  GSM_StateMachine *s = GSM_AllocStateMachine();
-  GSM_MultiSMSMessage *sms = (GSM_MultiSMSMessage *) malloc(sizeof(*sms));
+  s->errno = ERR_NONE;
+  s->sm = GSM_AllocStateMachine();
 
-  if (GSM_FindGammuRC(&ini, NULL) != ERR_NONE) {
-    return 1;
+  if ((s->errno = GSM_FindGammuRC(&ini, config_path)) != ERR_NONE) {
+    return s;
   }
 
-  if (GSM_ReadConfig(ini, GSM_GetConfig(s, 0), 0) != ERR_NONE) {
-    return 2;
+  GSM_Config *cfg = GSM_GetConfig(s->sm, 0);
+
+  if ((s->errno = GSM_ReadConfig(ini, cfg, 0)) != ERR_NONE) {
+    return s;
   }
 
   INI_Free(ini);
-  GSM_SetConfigNum(s, 1);
+  GSM_SetConfigNum(s->sm, 1);
 
-  if (GSM_InitConnection(s, 1) != ERR_NONE) {
-    return 3;
+  if ((s->errno = GSM_InitConnection(s->sm, 1)) != ERR_NONE) {
+    return s;
   }
 
-  int i;
+  return s;
+}
+
+/**
+ * @name gammu_free:
+ */
+void gammu_free(gammu_state_t *s) {
+
+  GSM_FreeStateMachine(s->sm);
+  free(s);
+}
+
+
+/**
+ * @name retrieve_sms_all:
+ */
+int retrieve_sms_all(gammu_state_t *s) {
+
   int start = TRUE;
+
+  GSM_MultiSMSMessage *sms =
+    (GSM_MultiSMSMessage *) malloc_and_zero(sizeof(*sms));
 
   printf("[");
 
   for (;;) {
 
-    int err = GSM_GetNextSMS(s, sms, start);
+    int err = GSM_GetNextSMS(s->sm, sms, start);
 
     if (err == ERR_EMPTY) {
       break;
     }
 
     if (err != ERR_NONE) {
-      return 4;
+      return 2;
     }
 
     if (!start) {
       printf(", ");
     }
-    
+
+    int i;
     start = FALSE;
 
     for (i = 0; i < sms->Number; i++) {
@@ -157,11 +199,10 @@ int retrieve_sms_all() {
 
   printf("]\n");
 
-  if (GSM_TerminateConnection(s) != ERR_NONE) {
+  if (GSM_TerminateConnection(s->sm) != ERR_NONE) {
     return 127;
   }
 
-  GSM_FreeStateMachine(s);
   free(sms);
 
   return 0;
@@ -181,14 +222,25 @@ int usage(int argc, char *argv[]) {
  */
 int main(int argc, char *argv[]) {
 
+  int rv = 111;
+
   if (argc < 2) {
     return usage(argc, argv);
   }
 
-  if (strcmp(argv[1], "retrieve") == 0) {
-    return retrieve_sms_all();
+  gammu_state_t *s = gammu_create(NULL);
+
+  if (!s) {
+    return 1;
   }
 
-  return 111;
+  if (strcmp(argv[1], "retrieve") == 0) {
+    retrieve_sms_all(s);
+    goto cleanup;
+  }
+
+  cleanup:
+    gammu_free(s);
+    return rv;
 }
 
