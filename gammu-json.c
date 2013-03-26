@@ -413,7 +413,7 @@ int delete_single_message(gammu_state_t *s,
 
   for (int i = 0; i < sms->Number; i++) {
 
-    if (!bitfield_test(bf, sms->SMS[i].Location)) {
+    if (bf && !bitfield_test(bf, sms->SMS[i].Location)) {
       continue;
     }
 
@@ -497,83 +497,145 @@ int bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
 }
 
 /**
+ * @name gammu_create_if_necessary:
+ */
+gammu_state_t *gammu_create_if_necessary(gammu_state_t **sp) {
+
+  if (*sp != NULL) {
+    return *sp;
+  }
+
+  gammu_state_t *rv = gammu_create(NULL);
+
+  if (!rv) {
+    return NULL;
+  }
+
+  *sp = rv;
+  return rv;
+}
+
+/**
+ * @name action_retrieve_messages:
+ */
+int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
+
+  int rv = 0;
+
+  gammu_state_t *s = gammu_create_if_necessary(sp);
+
+  if (!s) {
+    fprintf(stderr, "Error: failed to start gammu\n");
+    rv = 1; goto cleanup;
+  }
+
+  if (!print_messages_json_utf8(s)) {
+    fprintf(stderr, "Error: failed to retrieve one or more messages\n");
+    rv = 2; goto cleanup;
+  }
+
+  cleanup:
+    return rv;
+}
+
+/**
+ * @name action_delete_messages:
+ */
+int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
+
+  int rv = 0;
+  bitfield_t *bf = NULL;
+
+  if (argc < 3) {
+    return usage(argc, argv);
+  }
+
+  int delete_all = (strcmp(argv[2], "all") == 0);
+
+  if (!delete_all) { 
+    unsigned long n = find_maximum_integer_argument(&argv[2]);
+
+    if (!n) {
+      fprintf(stderr, "Error: no valid location(s) specified\n");
+      rv = usage(argc, argv);
+      goto cleanup;
+    }
+    
+    if (n == ULONG_MAX && errno == ERANGE) {
+      fprintf(stderr, "Error: integer argument would overflow\n");
+      rv = 3; goto cleanup;
+    }
+  
+    bitfield_t *bf = bitfield_create(n);
+
+    if (!bf) {
+      fprintf(stderr, "Error: failed to create deletion index\n");
+      rv = 4; goto cleanup_delete;
+    }
+
+    if (!bitfield_set_integer_arguments(bf, &argv[2])) {
+      fprintf(stderr, "Error: failed to add item(s) to deletion index\n");
+    }
+  }
+
+  gammu_state_t *s = gammu_create_if_necessary(sp);
+
+  if (!s) {
+    fprintf(stderr, "Error: failed to start gammu\n");
+    rv = 5; goto cleanup_delete;
+  }
+
+  if (!delete_selected_messages(s, bf)) {
+    fprintf(stderr, "Error: failed to delete one or more messages\n");
+    rv = 6; goto cleanup_delete;
+  }
+
+  cleanup_delete:
+    if (bf) {
+      bitfield_destroy(bf);
+    }
+  cleanup:
+    return rv;
+}
+
+/**
  * @name main:
  */
 int main(int argc, char *argv[]) {
 
   int rv = 0;
+  gammu_state_t *s = NULL;
 
   if (argc < 2) {
     return usage(argc, argv);
-  }
-
-  gammu_state_t *s = gammu_create(NULL);
-
-  if (!s) {
-    return 1;
   }
 
   /* Option #1:
    *   Retrieve all messages as a JSON array. */
 
   if (strcmp(argv[1], "retrieve") == 0) {
-
-    if (!print_messages_json_utf8(s)) {
-      fprintf(stderr, "Error: failed to retrieve one or more messages\n");
-      rv = 2; goto cleanup_retrieve;
-    }
-
-    cleanup_retrieve:
-      goto cleanup;
+    rv = action_retrieve_messages(&s, argc, argv);
+    goto cleanup;
   }
 
   /* Option #2:
    *   Delete messages specified in `argv` (or all messages). */
 
   if (strcmp(argv[1], "delete") == 0) {
-
-    unsigned long n = find_maximum_integer_argument(&argv[2]);
-
-    if (!n) {
-      rv = usage(argc, argv);
-      goto cleanup;
-    }
-    
-    if (n == ULONG_MAX && errno == ERANGE) {
-      fprintf(stderr, "Error: integer provided would overflow\n");
-      rv = 3; goto cleanup;
-    }
-    
-    bitfield_t *bf = bitfield_create(n);
-
-    if (!bf) {
-      fprintf(stderr, "Error: failed to create deletion index\n");
-      rv = 4; goto cleanup;
-    }
-
-    if (!bitfield_set_integer_arguments(bf, &argv[2])) {
-      fprintf(stderr, "Error: failed to add item(s) to deletion index\n");
-    }
-
-    if (!delete_selected_messages(s, bf)) {
-      fprintf(stderr, "Error: failed to delete one or more messages\n");
-      rv = 5; goto cleanup_delete;
-    }
-
-    cleanup_delete:
-      bitfield_destroy(bf);
-      goto cleanup;
+    rv = action_delete_messages(&s, argc, argv);
+    goto cleanup;
   }
 
   /* No other valid options:
-   *  Display message and usage information.
-   */
+   *  Display message and usage information. */
 
   fprintf(stderr, "Error: invalid action specified\n");
   rv = usage(argc, argv);
 
   cleanup:
-    gammu_destroy(s);
+    if (s) {
+      gammu_destroy(s);
+    }
     return rv;
 }
 
