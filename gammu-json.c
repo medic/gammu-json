@@ -2,9 +2,13 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <limits.h>
+#include <inttypes.h>
+
 #include <gammu.h>
 
 #define TIMESTAMP_MAX_WIDTH (64)
+#define BITFIELD_CELL_WIDTH (CHAR_BIT)
 
 /**
  * @name gammu_state_t
@@ -34,6 +38,16 @@ typedef int (*message_iterate_fn_t)(
 );
 
 /**
+ * @name bitfield_t
+ */
+typedef struct bitfield {
+
+  unsigned int n;
+  uint8_t *data;
+
+} bitfield_t;
+
+/**
  * @name malloc_and_zero
  */
 static void *malloc_and_zero(int size) {
@@ -42,6 +56,64 @@ static void *malloc_and_zero(int size) {
 
   memset(rv, '\0', size);
   return rv;
+}
+
+/**
+ * @name bitfield_create:
+ */
+bitfield_t *bitfield_create(unsigned int bits) {
+
+  bitfield_t *rv = (bitfield_t *) malloc_and_zero(sizeof(*rv));
+  unsigned int cells = (bits / BITFIELD_CELL_WIDTH);
+
+  if (bits % BITFIELD_CELL_WIDTH) {
+    cells++;
+  }
+
+  rv->n = bits;
+  rv->data = (uint8_t *) calloc(cells, BITFIELD_CELL_WIDTH);
+
+  return rv;
+}
+
+/**
+ * @name bitfield_destroy:
+ */
+void bitfield_destroy(bitfield_t *bf) {
+
+  free(bf->data);
+  free(bf);
+}
+
+/**
+ * @name bitfield_test:
+ */
+int bitfield_test(bitfield_t *bf, unsigned int bit) {
+
+  if (bit >= bf->n) {
+    return FALSE;
+  }
+
+  unsigned int cell = (bit / BITFIELD_CELL_WIDTH);
+  unsigned int offset = (bit % BITFIELD_CELL_WIDTH);
+
+  return (bf->data[cell] & (1 << offset));
+}
+
+/**
+ * @name bitfield_set:
+ */
+int bitfield_set(bitfield_t *bf, unsigned int bit, int value) {
+
+  if (bit >= bf->n) {
+    return FALSE;
+  }
+
+  unsigned int cell = (bit / BITFIELD_CELL_WIDTH);
+  unsigned int offset = (bit % BITFIELD_CELL_WIDTH);
+
+  bf->data[cell] &= (1 << offset);
+  return TRUE;
 }
 
 /**
@@ -169,9 +241,9 @@ gammu_state_t *gammu_create(const char *config_path) {
 }
 
 /**
- * @name gammu_free:
+ * @name gammu_destroy:
  */
-void gammu_free(gammu_state_t *s) {
+void gammu_destroy(gammu_state_t *s) {
 
   GSM_FreeStateMachine(s->sm);
   free(s);
@@ -217,9 +289,9 @@ int for_each_message(gammu_state_t *s,
 /**
  * @name print_message_json_utf8:
  */
-int print_message_json_utf8(gammu_state_t *s, message_t *sms, int first) {
-
-  if (!first) {
+int print_message_json_utf8(gammu_state_t *s,
+			    message_t *sms, int is_start, void *x) {
+  if (!is_start) {
     printf(", ");
   }
 
@@ -327,9 +399,14 @@ int print_messages_json_utf8(gammu_state_t *s) {
 /**
  * @name delete_single_message:
  */
-int delete_single_message(gammu_state_t *s, message_t *sms) {
+int delete_single_message(gammu_state_t *s,
+			  message_t *sms, int is_start, void *x) {
+
+  bitfield_t *bf = (bitfield_t *) x;
 
   for (int i = 0; i < sms->Number; i++) {
+    if (!bitfield_test(bf, sms->SMS[i].Location)) {
+    }
     if ((s->errno = GSM_DeleteSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
       return FALSE;
     }
@@ -341,10 +418,10 @@ int delete_single_message(gammu_state_t *s, message_t *sms) {
 /**
  * @name delete_selected_messages:
  */
-int delete_selected_messages(gammu_state_t *s) {
+int delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
 
   int rv = for_each_message(
-    s, (message_iterate_fn_t) delete_single_message, NULL
+    s, (message_iterate_fn_t) delete_single_message, (void *) bf
   );
 
   return rv;
@@ -390,15 +467,24 @@ int main(int argc, char *argv[]) {
   /* Delete specified messages (or all) */
   if (strcmp(argv[1], "delete") == 0) {
 
-    if (!delete_selected_messages(s)) {
+    int n = (argc - 1);
+    bitfield_t *bf = bitfield_create(n);
+
+    if (!bf) {
       rv = 3;
+      goto cleanup;
     }
 
+    if (!delete_selected_messages(s, bf)) {
+      rv = 4;
+    }
+
+    bitfield_destroy(bf);
     goto cleanup;
   }
 
   cleanup:
-    gammu_free(s);
+    gammu_destroy(s);
     return rv;
 }
 
