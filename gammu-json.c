@@ -1,4 +1,5 @@
 
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -15,7 +16,7 @@
  */
 typedef struct gammu_state {
 
-  int errno;
+  int err;
   GSM_StateMachine *sm;
 
 } gammu_state_t;
@@ -63,10 +64,11 @@ static void *malloc_and_zero(int size) {
  */
 bitfield_t *bitfield_create(unsigned int bits) {
 
+  unsigned int size = bits + 1; /* One-based */
+  unsigned int cells = (size / BITFIELD_CELL_WIDTH);
   bitfield_t *rv = (bitfield_t *) malloc_and_zero(sizeof(*rv));
-  unsigned int cells = (bits / BITFIELD_CELL_WIDTH);
 
-  if (bits % BITFIELD_CELL_WIDTH) {
+  if (size % BITFIELD_CELL_WIDTH) {
     cells++;
   }
 
@@ -87,32 +89,37 @@ void bitfield_destroy(bitfield_t *bf) {
 
 /**
  * @name bitfield_test:
+ *   Return true if the one-based bit `bit` is set. Returns true
+ *   on success, false if `bit` is out of range for this bitfield.
  */
-int bitfield_test(bitfield_t *bf, unsigned int bit) {
+int bitfield_test(bitfield_t *bf, unsigned long bit) {
 
-  if (bit >= bf->n) {
+  if (bit > bf->n) {
     return FALSE;
   }
 
-  unsigned int cell = (bit / BITFIELD_CELL_WIDTH);
-  unsigned int offset = (bit % BITFIELD_CELL_WIDTH);
+  unsigned long cell = (bit / BITFIELD_CELL_WIDTH);
+  unsigned long offset = (bit % BITFIELD_CELL_WIDTH);
 
   return (bf->data[cell] & (1 << offset));
 }
 
 /**
  * @name bitfield_set:
+ *   Set the one-based bit `bit` to one if `value` is non-zero,
+ *   otherwise set the bit to zero. Returns true on success, false
+ *   if the bit `bit` is out of range for this particular bitfield.
  */
-int bitfield_set(bitfield_t *bf, unsigned int bit, int value) {
+int bitfield_set(bitfield_t *bf, unsigned long bit, int value) {
 
-  if (bit >= bf->n) {
+  if (bit > bf->n) {
     return FALSE;
   }
 
-  unsigned int cell = (bit / BITFIELD_CELL_WIDTH);
-  unsigned int offset = (bit % BITFIELD_CELL_WIDTH);
+  unsigned long cell = (bit / BITFIELD_CELL_WIDTH);
+  unsigned long offset = (bit % BITFIELD_CELL_WIDTH);
 
-  bf->data[cell] &= (1 << offset);
+  bf->data[cell] |= (1 << offset);
   return TRUE;
 }
 
@@ -217,23 +224,23 @@ gammu_state_t *gammu_create(const char *config_path) {
   INI_Section *ini;
   GSM_InitLocales(NULL);
 
-  s->errno = ERR_NONE;
+  s->err = ERR_NONE;
   s->sm = GSM_AllocStateMachine();
 
-  if ((s->errno = GSM_FindGammuRC(&ini, config_path)) != ERR_NONE) {
+  if ((s->err = GSM_FindGammuRC(&ini, config_path)) != ERR_NONE) {
     return s;
   }
 
   GSM_Config *cfg = GSM_GetConfig(s->sm, 0);
 
-  if ((s->errno = GSM_ReadConfig(ini, cfg, 0)) != ERR_NONE) {
+  if ((s->err = GSM_ReadConfig(ini, cfg, 0)) != ERR_NONE) {
     return s;
   }
 
   INI_Free(ini);
   GSM_SetConfigNum(s->sm, 1);
 
-  if ((s->errno = GSM_InitConnection(s->sm, 1)) != ERR_NONE) {
+  if ((s->err = GSM_InitConnection(s->sm, 1)) != ERR_NONE) {
     return s;
   }
 
@@ -405,9 +412,12 @@ int delete_single_message(gammu_state_t *s,
   bitfield_t *bf = (bitfield_t *) x;
 
   for (int i = 0; i < sms->Number; i++) {
+
     if (!bitfield_test(bf, sms->SMS[i].Location)) {
+      continue;
     }
-    if ((s->errno = GSM_DeleteSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
+
+    if ((s->err = GSM_DeleteSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
       return FALSE;
     }
   }
@@ -432,8 +442,58 @@ int delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
  */
 int usage(int argc, char *argv[]) {
 
-  printf("Usage: %s [ retrieve | delete message_number... ]\n", argv[0]);
+  fprintf(
+    stderr, "Usage: %s [ retrieve | delete message_number... ]\n",
+      argv[0]
+  );
+
   return 127;
+}
+
+/**
+ * @name find_maximum_integer_argument:
+ */
+unsigned long find_maximum_integer_argument(char *argv[]) {
+
+  unsigned int rv = 0;
+
+  for (int i = 0; argv[i] != NULL; i++) {
+
+    char *err = NULL;
+    unsigned long n = strtoul(argv[i], &err, 10);
+
+    if (err == NULL || *err != '\0') {
+      continue;
+    }
+
+    if (n > 0 && n > rv) {
+      rv = n;
+    }
+  }
+
+  return rv;
+}
+
+/**
+ * @name bitfield_set_integer_arguments:
+ */
+int bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
+
+  for (int i = 0; argv[i] != NULL; i++) {
+
+    char *err = NULL;
+    unsigned long n = strtoul(argv[i], &err, 10);
+
+    if (err == NULL || *err != '\0') {
+      return FALSE;
+    }
+
+    if (!bitfield_set(bf, n, 1)) {
+      return FALSE;
+    }
+  }
+
+  return TRUE;
 }
 
 /**
@@ -450,37 +510,59 @@ int main(int argc, char *argv[]) {
   gammu_state_t *s = gammu_create(NULL);
 
   if (!s) {
-    rv = 1;
-    goto cleanup;
+    return 1;
   }
 
-  /* Retrieve messages as JSON */
+  /* Option #1:
+   *   Retrieve all messages as a JSON array. */
+
   if (strcmp(argv[1], "retrieve") == 0) {
 
     if (!print_messages_json_utf8(s)) {
-      rv = 2;
+      fprintf(stderr, "Error: failed to retrieve one or more messages\n");
+      rv = 2; goto cleanup_retrieve;
     }
 
-    goto cleanup;
+    cleanup_retrieve:
+      goto cleanup;
   }
 
-  /* Delete specified messages (or all) */
+  /* Option #2:
+   *   Delete messages specified in `argv` (or all messages). */
+
   if (strcmp(argv[1], "delete") == 0) {
 
-    int n = (argc - 1);
+    unsigned long n = find_maximum_integer_argument(&argv[2]);
+
+    if (!n) {
+      rv = usage(argc, argv);
+      goto cleanup;
+    }
+    
+    if (n == ULONG_MAX && errno == ERANGE) {
+      fprintf(stderr, "Error: integer provided would overflow\n");
+      rv = 3; goto cleanup;
+    }
+    
     bitfield_t *bf = bitfield_create(n);
 
     if (!bf) {
-      rv = 3;
-      goto cleanup;
+      fprintf(stderr, "Error: failed to create deletion index\n");
+      rv = 4; goto cleanup;
+    }
+
+    if (!bitfield_set_integer_arguments(bf, &argv[2])) {
+      fprintf(stderr, "Error: failed to add item(s) to deletion index\n");
     }
 
     if (!delete_selected_messages(s, bf)) {
-      rv = 4;
+      fprintf(stderr, "Error: failed to delete one or more messages\n");
+      rv = 5; goto cleanup_delete;
     }
 
-    bitfield_destroy(bf);
-    goto cleanup;
+    cleanup_delete:
+      bitfield_destroy(bf);
+      goto cleanup;
   }
 
   cleanup:

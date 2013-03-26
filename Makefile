@@ -1,6 +1,6 @@
 
 LDFLAGS := -lm
-CFLAGS := -Wall -std=c99 -Os
+CFLAGS := -Wall -std=c99 -Os -g
 
 GAMMU_LDFLAGS := $(shell pkg-config --libs gammu)
 GAMMU_CFLAGS := $(shell pkg-config --cflags gammu)
