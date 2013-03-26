@@ -4,6 +4,7 @@
 #include <string.h>
 #include <gammu.h>
 
+#define TIMESTAMP_MAX_WIDTH (64)
 
 /**
  * @name gammu_state_t
@@ -19,6 +20,11 @@ typedef struct gammu_state {
  * @name message_t
  */
 typedef GSM_MultiSMSMessage message_t;
+
+/**
+ * @name message_timestamp_t
+ */
+typedef GSM_DateTime message_timestamp_t;
 
 /**
  * @name message_iterate_fn_t
@@ -95,6 +101,33 @@ char *encode_json_utf8(const unsigned char *ucs2_str) {
   free(b);
 
   return rv;
+}
+
+/**
+ * @name encode_timestamp_utf8:
+ */
+char *encode_timestamp_utf8(message_timestamp_t *t) {
+
+  int n = TIMESTAMP_MAX_WIDTH;
+  char *rv = (char *) malloc_and_zero(n);
+
+  snprintf(
+    rv, n, "%.4d-%.2d-%.2d %.2d:%.2d:%.2d",
+      t->Year, t->Month, t->Day, t->Hour, t->Minute, t->Second
+  );
+
+  return rv;
+}
+
+/**
+ * @name encode_timestamp_utf8:
+ */
+int is_empty_timestamp(message_timestamp_t *t) {
+
+  return (
+    t->Year == 0 && t->Month == 0 && t->Day == 0 &&
+      t->Hour == 0 && t->Minute == 0 && t->Second == 0
+  );
 }
 
 /**
@@ -208,9 +241,30 @@ int print_message_json_utf8(gammu_state_t *s, message_t *sms, int first) {
     printf("\"smsc\": \"%s\", ", smsc);
     free(smsc);
 
+    /* Receive timestamp */
+    if (is_empty_timestamp(&sms->SMS[i].DateTime)) {
+      printf("\"timestamp\": false, ");
+    } else {
+      char *timestamp = encode_timestamp_utf8(&sms->SMS[i].DateTime);
+      printf("\"timestamp\": \"%s\", ", timestamp);
+      free(timestamp);
+    }
+
+    /* SMSC receive timestamp */
+    if (is_empty_timestamp(&sms->SMS[i].SMSCTime)) {
+      printf("\"smsc-timestamp\": false, ");
+    } else {
+      char *smsc_timestamp = encode_timestamp_utf8(&sms->SMS[i].SMSCTime);
+      printf("\"smsc-timestamp\": \"%s\", ", smsc_timestamp);
+      free(smsc_timestamp);
+    }
+
     /* Multi-part message metadata */
-    printf("\"segment\": %d, ", sms->SMS[i].UDH.PartNumber);
-    printf("\"total-segments\": %d, ", sms->SMS[i].UDH.AllParts);
+    int parts = sms->SMS[i].UDH.AllParts;
+    int part = sms->SMS[i].UDH.PartNumber;
+
+    printf("\"segment\": %d, ", (part > 0 ? part : 1));
+    printf("\"total-segments\": %d, ", (parts > 0 ? parts : 1));
 
     /* Identifier from user data header */
     if (sms->SMS[i].UDH.Type != UDH_NoUDH) {
@@ -248,7 +302,7 @@ int print_message_json_utf8(gammu_state_t *s, message_t *sms, int first) {
       }
     }
 
-    printf("\"complete\": true");
+    printf("\"in-inbox\": %s", sms->SMS[i].InboxFolder ? "true" : "false");
     printf("}");
   }
 
