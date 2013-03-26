@@ -72,7 +72,7 @@ char *encode_json_utf8(const unsigned char *ucs2_str) {
           break;
       };
 
-      if (escape) {
+      if (escape != '\0') {
         b[j++] = '\0';
         b[j++] = '\\';
         lsb = escape;
@@ -86,8 +86,10 @@ char *encode_json_utf8(const unsigned char *ucs2_str) {
   b[j++] = '\0';
   b[j++] = '\0';
 
-  char *rv =
-    (char *) malloc_and_zero(UnicodeLength(b) + 1);
+  /* Worst-case UTF-8:
+   *  Four bytes per character (see RFC3629), plus 1-byte NUL. */
+
+  char *rv = (char *) malloc_and_zero(4 * UnicodeLength(b) + 1);
 
   EncodeUTF8(rv, b);
   free(b);
@@ -167,11 +169,12 @@ int for_each_message(gammu_state_t *s,
     }
 
     rv = TRUE;
-    start = FALSE;
     
     if (!fn(s, sms, start, x)) {
       break;
     }
+    
+    start = FALSE;
   }
 
   free(sms);
@@ -191,32 +194,61 @@ int print_message_json_utf8(gammu_state_t *s, message_t *sms, int first) {
 
     printf("{");
 
+    /* Modem file/location information */
     printf("\"folder\": %d, ", sms->SMS[i].Folder);
     printf("\"location\": %d, ", sms->SMS[i].Location);
 
+    /* Originating phone number */
     char *from = encode_json_utf8(sms->SMS[i].Number);
     printf("\"from\": \"%s\", ", from);
     free(from);
 
+    /* Phone number of telco's SMS service center */
     char *smsc = encode_json_utf8(sms->SMS[i].SMSC.Number);
     printf("\"smsc\": \"%s\", ", smsc);
     free(smsc);
 
+    /* Multi-part message metadata */
     printf("\"segment\": %d, ", sms->SMS[i].UDH.PartNumber);
     printf("\"total-segments\": %d, ", sms->SMS[i].UDH.AllParts);
 
+    /* Identifier from user data header */
     if (sms->SMS[i].UDH.Type != UDH_NoUDH) {
       if (sms->SMS[i].UDH.ID16bit != -1) {
         printf("\"udh\": %d, ", sms->SMS[i].UDH.ID16bit);
-      } else {
+      } else if (sms->SMS[i].UDH.ID16bit != -1) {
         printf("\"udh\": %d, ", sms->SMS[i].UDH.ID8bit);
+      } else {
+        printf("\"udh\": false, ");
       }
     }
 
-    char *text = encode_json_utf8(sms->SMS[i].Text);
-    printf("\"content\": \"%s\"", text);
-    free(text);
+    /* Text and text encoding */
+    switch (sms->SMS[i].Coding) {
+      case SMS_Coding_8bit: {
+        printf("\"encoding\": \"binary\", ");
+	break;
+      }
+      case SMS_Coding_Default_No_Compression:
+      case SMS_Coding_Unicode_No_Compression: {
+        printf("\"encoding\": \"utf-8\", ");
+        char *text = encode_json_utf8(sms->SMS[i].Text);
+        printf("\"content\": \"%s\", ", text);
+        free(text);
+        break;
+      }
+      case SMS_Coding_Unicode_Compression:
+      case SMS_Coding_Default_Compression: {
+        printf("\"encoding\": \"unsupported\", ");
+	break;
+      }
+      default: {
+        printf("\"encoding\": \"invalid\", ");
+	break;
+      }
+    }
 
+    printf("\"complete\": true");
     printf("}");
   }
 
