@@ -443,7 +443,7 @@ int delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
 int usage(int argc, char *argv[]) {
 
   fprintf(
-    stderr, "Usage: %s [ retrieve | delete message_number... ]\n",
+    stderr, "Usage: %s { retrieve | delete N... }\n",
       argv[0]
   );
 
@@ -564,6 +564,13 @@ int main(int argc, char *argv[]) {
       bitfield_destroy(bf);
       goto cleanup;
   }
+
+  /* No other valid options:
+   *  Display message and usage information.
+   */
+
+  fprintf(stderr, "Error: invalid action specified\n");
+  rv = usage(argc, argv);
 
   cleanup:
     gammu_destroy(s);
