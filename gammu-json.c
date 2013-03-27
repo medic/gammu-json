@@ -48,6 +48,10 @@ typedef GSM_DateTime message_timestamp_t;
  */
 typedef GSM_SMSC smsc_t;
 
+/**
+ * @name boolean_t
+ */
+typedef uint8_t boolean_t;
 
 /**
  * @name message_iterate_fn_t
@@ -81,9 +85,11 @@ typedef struct utf8_length_info {
  */
 typedef struct transmit_status {
 
-  int finished;
-  int last_send_status;
+  int send_status;
+  boolean_t finished;
   int reference_number;
+  unsigned int parts_sent;
+  unsigned int parts_total;
 
 } transmit_status_t;
 
@@ -130,7 +136,12 @@ utf8_length_info_t *utf8_string_length(const char *str,
  */
 transmit_status_t *initialize_transmit_status(transmit_status_t *s) {
 
+  s->parts_sent = 0;
+  s->parts_total = 0;
+  s->send_status = 0;
   s->finished = FALSE;
+  s->reference_number = 0;
+
   return s;
 }
 
@@ -168,7 +179,7 @@ void bitfield_destroy(bitfield_t *bf) {
  *   Return true if the one-based bit `bit` is set. Returns true
  *   on success, false if `bit` is out of range for this bitfield.
  */
-int bitfield_test(bitfield_t *bf, unsigned long bit) {
+boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
 
   if (bit > bf->n) {
     return FALSE;
@@ -186,7 +197,7 @@ int bitfield_test(bitfield_t *bf, unsigned long bit) {
  *   otherwise set the bit to zero. Returns true on success, false
  *   if the bit `bit` is out of range for this particular bitfield.
  */
-int bitfield_set(bitfield_t *bf, unsigned long bit, int value) {
+boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, int value) {
 
   if (bit > bf->n) {
     return FALSE;
@@ -294,7 +305,7 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
  *   attached.
  *  
  */
-int ucs2_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
+boolean_t ucs2_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
 
   switch (msb) {
 
@@ -350,7 +361,7 @@ int ucs2_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
  *   the GSM default alphabet. The input string should be terminated
  *   by the UCS-2 null character (i.e. two null bytes).
  */
-int ucs2_is_gsm_string(const unsigned char *s) {
+boolean_t ucs2_is_gsm_string(const unsigned char *s) {
 
   int ul = UnicodeLength(s);
 
@@ -366,7 +377,7 @@ int ucs2_is_gsm_string(const unsigned char *s) {
 /**
  * @name is_empty_timestamp:
  */
-int is_empty_timestamp(message_timestamp_t *t) {
+boolean_t is_empty_timestamp(message_timestamp_t *t) {
 
   return (
     t->Year == 0 && t->Month == 0 && t->Day == 0 &&
@@ -426,10 +437,10 @@ void gammu_destroy(gammu_state_t *s) {
 /**
  * @name for_each_message:
  */
-int for_each_message(gammu_state_t *s,
-                     message_iterate_fn_t fn, void *x) {
-  int rv = FALSE;
-  int start = TRUE;
+boolean_t for_each_message(gammu_state_t *s,
+                           message_iterate_fn_t fn, void *x) {
+  boolean_t rv = FALSE;
+  boolean_t start = TRUE;
 
   multimessage_t *sms =
     (multimessage_t *) malloc_and_zero(sizeof(*sms));
@@ -463,8 +474,9 @@ int for_each_message(gammu_state_t *s,
 /**
  * @name print_message_json_utf8:
  */
-int print_message_json_utf8(gammu_state_t *s,
-                            multimessage_t *sms, int is_start, void *x) {
+boolean_t print_message_json_utf8(gammu_state_t *s,
+                                  multimessage_t *sms,
+                                  int is_start, void *x) {
   if (!is_start) {
     printf(", ");
   }
@@ -562,7 +574,7 @@ int print_messages_json_utf8(gammu_state_t *s) {
 
   printf("[");
 
-  int rv = for_each_message(
+  boolean_t rv = for_each_message(
     s, (message_iterate_fn_t) print_message_json_utf8, NULL
   );
 
@@ -573,8 +585,9 @@ int print_messages_json_utf8(gammu_state_t *s) {
 /**
  * @name delete_single_message:
  */
-int delete_single_message(gammu_state_t *s,
-                          multimessage_t *sms, int is_start, void *x) {
+boolean_t delete_single_message(gammu_state_t *s,
+                                multimessage_t *sms,
+                                boolean_t is_start, void *x) {
 
   bitfield_t *bf = (bitfield_t *) x;
 
@@ -595,9 +608,9 @@ int delete_single_message(gammu_state_t *s,
 /**
  * @name delete_selected_messages:
  */
-int delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
+boolean_t delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
 
-  int rv = for_each_message(
+  boolean_t rv = for_each_message(
     s, (message_iterate_fn_t) delete_single_message, (void *) bf
   );
 
@@ -644,7 +657,7 @@ unsigned long find_maximum_integer_argument(char *argv[]) {
 /**
  * @name bitfield_set_integer_arguments:
  */
-int bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
+boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
 
   for (int i = 0; argv[i] != NULL; i++) {
 
@@ -766,19 +779,36 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     return rv;
 }
 
+
+/**
+ * @name print_json_transmit_status:
+ */
+void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
+                                transmit_status_t *t, boolean_t is_start) {
+
+  if (!is_start) {
+    printf(",");
+  }
+
+  printf("{");
+  printf("\"status\": \"%d\", ", t->send_status);
+  printf("\"parts-sent\": \"%d\", ", t->parts_sent);
+  printf("\"parts-total\": \"%d\", ", t->parts_total);
+  printf("\"reference\": \"%d\"", t->reference_number);
+  printf("}");
+}
+
 /**
  * @name _message_transmit_callback:
  */
-void _message_transmit_callback(GSM_StateMachine *sm,
-                                int status, int ref, void *x) {
+static void _message_transmit_callback(GSM_StateMachine *sm,
+                                       int status, int ref, void *x) {
 
   transmit_status_t *s = (transmit_status_t *) x;
 
   s->finished = TRUE;
+  s->send_status = status;
   s->reference_number = ref;
-  s->last_send_status = status;
-  
-  fprintf(stderr, "_message_transmit_callback: %d %d\n", status, ref);
 }
 
 /**
@@ -788,6 +818,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   int rv = 0;
   char **argp = &argv[1];
+  boolean_t is_start = TRUE;
 
   if (argc <= 2) {
     return usage();
@@ -829,6 +860,8 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     s->sm, _message_transmit_callback, &status
   );
 
+  printf("[");
+
   /* For each message... */
   while (*argp != NULL) {
 
@@ -848,7 +881,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
         stderr, "Error: Phone number `%s' is too long\n",
           sms_destination_number
       );
-      rv = 3; goto cleanup_sms;
+      rv = 3; goto cleanup_transmit_status;
     }
 
     /* Missing message text:
@@ -860,7 +893,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
         stderr, "Error: no message body provided for `%s'\n",
           sms_destination_number
       );
-      rv = 4; goto cleanup_sms;
+      rv = 4; goto cleanup_transmit_status;
       break;
     }
 
@@ -888,9 +921,12 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     info->UnicodeCoding = !ucs2_is_gsm_string(sms_message_ucs2);
 
     if ((s->err = GSM_EncodeMultiPartSMS(debug, info, sms)) != ERR_NONE) {
-      fprintf(stderr, "Error: Failed to encode message");
+      fprintf(stderr, "Warning: Failed to encode message\n");
       rv = 5; goto cleanup_sms_text;
     }
+
+    status.parts_sent = 0;
+    status.parts_total = sms->Number;
 
     /* For each SMS part... */
     for (int i = 0; i < sms->Number; i++) {
@@ -906,21 +942,27 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
       /* Transmit a single message part */
       if ((s->err = GSM_SendSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
+        fprintf(stderr, "Warning: Failed to send message part %d\n", i);
         rv = 6; goto cleanup_sms_text;
       }
 
-      /* Wait for reply */
       for (;;) {
+        /* Wait for reply */
         GSM_ReadDevice(s->sm, TRUE);
 
         if (status.finished) {
           break;
         }
       }
+
+      status.parts_sent++;
     }
 
     cleanup_sms_text:
       free(sms_message_ucs2);
+    cleanup_transmit_status:
+      print_json_transmit_status(s, sms, &status, is_start);
+      is_start = FALSE;
   }
 
   cleanup_sms:
@@ -929,6 +971,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     free(info);
 
   cleanup:
+    printf("]");
     return rv;
 }
 
