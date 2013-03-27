@@ -108,7 +108,7 @@ static void *malloc_and_zero(int size) {
  * @name utf8_string_length:
  */
 utf8_length_info_t *utf8_string_length(const char *str,
-				       utf8_length_info_t *i) {
+                                       utf8_length_info_t *i) {
   const char *p = str;
   unsigned int bytes = 0, symbols = 0;
 
@@ -379,7 +379,7 @@ int for_each_message(gammu_state_t *s,
  * @name print_message_json_utf8:
  */
 int print_message_json_utf8(gammu_state_t *s,
-			    multimessage_t *sms, int is_start, void *x) {
+                            multimessage_t *sms, int is_start, void *x) {
   if (!is_start) {
     printf(", ");
   }
@@ -442,7 +442,7 @@ int print_message_json_utf8(gammu_state_t *s,
     switch (sms->SMS[i].Coding) {
       case SMS_Coding_8bit: {
         printf("\"encoding\": \"binary\", ");
-	break;
+        break;
       }
       case SMS_Coding_Default_No_Compression:
       case SMS_Coding_Unicode_No_Compression: {
@@ -455,11 +455,11 @@ int print_message_json_utf8(gammu_state_t *s,
       case SMS_Coding_Unicode_Compression:
       case SMS_Coding_Default_Compression: {
         printf("\"encoding\": \"unsupported\", ");
-	break;
+        break;
       }
       default: {
         printf("\"encoding\": \"invalid\", ");
-	break;
+        break;
       }
     }
 
@@ -489,7 +489,7 @@ int print_messages_json_utf8(gammu_state_t *s) {
  * @name delete_single_message:
  */
 int delete_single_message(gammu_state_t *s,
-			  multimessage_t *sms, int is_start, void *x) {
+                          multimessage_t *sms, int is_start, void *x) {
 
   bitfield_t *bf = (bitfield_t *) x;
 
@@ -685,7 +685,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
  * @name _message_transmit_callback:
  */
 void _message_transmit_callback(GSM_StateMachine *sm,
-				int status, int ref, void *x) {
+                                int status, int ref, void *x) {
 
   transmit_status_t *s = (transmit_status_t *) x;
 
@@ -756,12 +756,12 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     utf8_string_length(sms_destination_number, &nl);
 
     /* Check size of phone number:
-	We'll be decoding this in to a fixed-sized buffer. */
+        We'll be decoding this in to a fixed-sized buffer. */
 
     if (nl.bytes > 24) {
       fprintf(
         stderr, "Error: Phone number `%s' is too long\n",
-	  sms_destination_number
+          sms_destination_number
       );
       rv = 3; goto cleanup_sms;
     }
@@ -773,7 +773,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     if (*argp == NULL) {
       fprintf(
         stderr, "Error: no message body provided for `%s'\n",
-	  sms_destination_number
+          sms_destination_number
       );
       rv = 4; goto cleanup_sms;
       break;
