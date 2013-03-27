@@ -11,6 +11,8 @@
 #define TIMESTAMP_MAX_WIDTH (64)
 #define BITFIELD_CELL_WIDTH (CHAR_BIT)
 
+static char *application_name;
+
 /**
  * @name gammu_state_t
  */
@@ -22,9 +24,14 @@ typedef struct gammu_state {
 } gammu_state_t;
 
 /**
- * @name message_t
+ * @name multimessage_t
  */
-typedef GSM_MultiSMSMessage message_t;
+typedef GSM_SMSMessage message_t;
+
+/**
+ * @name multimessage_t
+ */
+typedef GSM_MultiSMSMessage multimessage_t;
 
 /**
  * @name message_timestamp_t
@@ -32,10 +39,16 @@ typedef GSM_MultiSMSMessage message_t;
 typedef GSM_DateTime message_timestamp_t;
 
 /**
+ * @name smsc_t
+ */
+typedef GSM_SMSC smsc_t;
+
+
+/**
  * @name message_iterate_fn_t
  */
 typedef int (*message_iterate_fn_t)(
-  gammu_state_t *, message_t *, int, void *
+  gammu_state_t *, multimessage_t *, int, void *
 );
 
 /**
@@ -49,14 +62,50 @@ typedef struct bitfield {
 } bitfield_t;
 
 /**
+ * @name utf8_info_t
+ */
+typedef struct utf8_length_info {
+
+  unsigned int bytes;
+  unsigned int symbols;
+
+} utf8_length_info_t;
+
+/**
  * @name malloc_and_zero
  */
 static void *malloc_and_zero(int size) {
 
   void *rv = malloc(size);
 
+  if (!rv) {
+    fprintf(stderr, "Fatal error: failed to allocate %d bytes\n", size);
+    exit(111);
+  }
+
   memset(rv, '\0', size);
   return rv;
+}
+
+/**
+ * @name utf8_string_length:
+ */
+utf8_length_info_t *utf8_string_length(const char *str,
+				       utf8_length_info_t *i) {
+  const char *p = str;
+  unsigned int bytes = 0, symbols = 0;
+
+  while (*p++) {
+    if ((*p & 0xc0) != 0x80) {
+      symbols++;
+    }
+    bytes++;
+  }
+
+  i->bytes = bytes;
+  i->symbols = symbols;
+
+  return i;
 }
 
 /**
@@ -66,6 +115,7 @@ bitfield_t *bitfield_create(unsigned int bits) {
 
   unsigned int size = bits + 1; /* One-based */
   unsigned int cells = (size / BITFIELD_CELL_WIDTH);
+
   bitfield_t *rv = (bitfield_t *) malloc_and_zero(sizeof(*rv));
 
   if (size % BITFIELD_CELL_WIDTH) {
@@ -252,7 +302,9 @@ gammu_state_t *gammu_create(const char *config_path) {
  */
 void gammu_destroy(gammu_state_t *s) {
 
+  GSM_TerminateConnection(s->sm);
   GSM_FreeStateMachine(s->sm);
+
   free(s);
 }
 
@@ -264,8 +316,8 @@ int for_each_message(gammu_state_t *s,
   int rv = FALSE;
   int start = TRUE;
 
-  message_t *sms =
-    (message_t *) malloc_and_zero(sizeof(*sms));
+  multimessage_t *sms =
+    (multimessage_t *) malloc_and_zero(sizeof(*sms));
 
   for (;;) {
 
@@ -297,7 +349,7 @@ int for_each_message(gammu_state_t *s,
  * @name print_message_json_utf8:
  */
 int print_message_json_utf8(gammu_state_t *s,
-			    message_t *sms, int is_start, void *x) {
+			    multimessage_t *sms, int is_start, void *x) {
   if (!is_start) {
     printf(", ");
   }
@@ -407,7 +459,7 @@ int print_messages_json_utf8(gammu_state_t *s) {
  * @name delete_single_message:
  */
 int delete_single_message(gammu_state_t *s,
-			  message_t *sms, int is_start, void *x) {
+			  multimessage_t *sms, int is_start, void *x) {
 
   bitfield_t *bf = (bitfield_t *) x;
 
@@ -440,11 +492,11 @@ int delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
 /**
  * @name usage:
  */
-int usage(int argc, char *argv[]) {
+int usage() {
 
   fprintf(
-    stderr, "Usage: %s { retrieve | delete N... }\n",
-      argv[0]
+    stderr, "Usage: %s { retrieve | send { phone text }... | delete N... }\n",
+      application_name
   );
 
   return 127;
@@ -546,7 +598,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   bitfield_t *bf = NULL;
 
   if (argc < 2) {
-    return usage(argc, argv);
+    return usage();
   }
 
   int delete_all = (strcmp(argv[1], "all") == 0);
@@ -557,7 +609,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
     if (!n) {
       fprintf(stderr, "Error: no valid location(s) specified\n");
-      rv = usage(argc, argv);
+      rv = usage();
       goto cleanup;
     }
     
@@ -600,17 +652,102 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
 }
 
 /**
+ * @name _message_transmit_callback:
+ */
+void _message_transmit_callback(GSM_StateMachine *sm,
+				int status, int ref, void *x) {
+
+  int *send_status = (int *) x;
+  fprintf(stderr, "_message_transmit_callback: %d %d\n", status, ref);
+  *send_status = TRUE;
+}
+
+/**
  * @name action_send_messages:
  */
 int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   int rv = 0;
+
+  if (argc <= 2) {
+    return usage();
+  }
+
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
     fprintf(stderr, "Error: failed to start gammu\n");
     rv = 1; goto cleanup;
   }
+
+  smsc_t *smsc = (smsc_t *) malloc_and_zero(sizeof(*smsc));
+  message_t *sms = (message_t *) malloc_and_zero(sizeof(*sms));
+
+  smsc->Location = 1;
+
+  if ((s->err = GSM_GetSMSC(s->sm, smsc)) != ERR_NONE) {
+    rv = 2; goto cleanup_message;
+  }
+
+  char **argp = &argv[1];
+  int send_status = FALSE;
+
+  GSM_SetSendSMSStatusCallback(
+    s->sm, _message_transmit_callback, &send_status
+  );
+
+  while (*argp != NULL) {
+
+    CopyUnicodeString(sms->SMSC.Number, smsc->Number);
+
+    /* MSISDN */
+    utf8_length_info_t pl;
+    char *sms_phone_number = *argp++;
+    utf8_string_length(sms_phone_number, &pl);
+
+    /* Missing message? */
+    if (*argp == NULL) {
+      fprintf(
+        stderr, "Error: no message body provided for `%s'\n",
+	  sms_phone_number
+      );
+      rv = 3; goto cleanup_message;
+      break;
+    }
+
+    /* Message content */
+    utf8_length_info_t ml;
+    char *sms_message_content = *argp++;
+    utf8_string_length(sms_message_content, &ml);
+
+    printf("symbols: %d, bytes: %d\n", ml.symbols, ml.bytes);
+
+    DecodeUTF8(sms->Text, sms_message_content, ml.bytes);
+    DecodeUTF8(sms->Number, sms_phone_number, pl.bytes);
+
+    sms->Class = 1;
+    sms->PDU = SMS_Submit;
+    sms->UDH.Type = UDH_NoUDH;
+    sms->Coding = SMS_Coding_Default_No_Compression;
+
+    if ((s->err = GSM_SendSMS(s->sm, sms)) != ERR_NONE) {
+      rv = 4; goto cleanup_message;
+    }
+
+    for (;;) {
+      GSM_ReadDevice(s->sm, TRUE);
+
+      if (send_status) {
+        break;
+      }
+    }
+
+    send_status = FALSE;
+  }
+
+  cleanup_message:
+    free(sms);
+    free(smsc);
 
   cleanup:
     return rv;
@@ -623,9 +760,10 @@ int main(int argc, char *argv[]) {
 
   int rv = 0;
   gammu_state_t *s = NULL;
+  /* global */ application_name = argv[0];
 
-  if (argc < 2) {
-    return usage(argc, argv);
+  if (argc <= 1) {
+    return usage();
   }
 
   /* Option #1:
@@ -644,18 +782,19 @@ int main(int argc, char *argv[]) {
     goto cleanup;
   }
 
-  /* Option #2:
-   *   Delete messages specified in `argv` (or all messages). */
+  /* Option #3:
+   *   Send one or more messages, each to a single recipient. */
 
   if (strcmp(argv[1], "send") == 0) {
     rv = action_send_messages(&s, argc - 1, &argv[1]);
     goto cleanup;
   }
+
   /* No other valid options:
    *  Display message and usage information. */
 
   fprintf(stderr, "Error: invalid action specified\n");
-  rv = usage(argc, argv);
+  rv = usage();
 
   cleanup:
     if (s) {
