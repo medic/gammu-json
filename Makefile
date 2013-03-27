@@ -1,9 +1,12 @@
 
 LDFLAGS := -lm
-CFLAGS := -Wall -std=c99 -Os -g
+CFLAGS := -Wall -std=c99 -g
 
-GAMMU_LDFLAGS := $(shell pkg-config --libs gammu)
-GAMMU_CFLAGS := $(shell pkg-config --cflags gammu)
+PREFIX ?= /usr
+PKG_CONFIG = PKG_CONFIG_PATH='$(PREFIX)/lib/pkgconfig' pkg-config
+
+GAMMU_LDFLAGS := $(shell $(PKG_CONFIG) --libs gammu)
+GAMMU_CFLAGS := $(shell $(PKG_CONFIG) --cflags gammu)
 
 all: gammu-json
 

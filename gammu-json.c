@@ -34,6 +34,11 @@ typedef GSM_SMSMessage message_t;
 typedef GSM_MultiSMSMessage multimessage_t;
 
 /**
+ * @name multimessage_info_t
+ */
+typedef GSM_MultiPartSMSInfo multimessage_info_t;
+
+/**
  * @name message_timestamp_t
  */
 typedef GSM_DateTime message_timestamp_t;
@@ -72,6 +77,18 @@ typedef struct utf8_length_info {
 } utf8_length_info_t;
 
 /**
+ * @name transmit_status_t
+ */
+typedef struct transmit_status {
+
+  int finished;
+  int last_send_status;
+  int reference_number;
+
+} transmit_status_t;
+
+
+/**
  * @name malloc_and_zero
  */
 static void *malloc_and_zero(int size) {
@@ -106,6 +123,15 @@ utf8_length_info_t *utf8_string_length(const char *str,
   i->symbols = symbols;
 
   return i;
+}
+
+/**
+ * @name initialize_transmit_status:
+ */
+transmit_status_t *initialize_transmit_status(transmit_status_t *s) {
+
+  s->finished = FALSE;
+  return s;
 }
 
 /**
@@ -181,8 +207,12 @@ char *encode_json_utf8(const unsigned char *ucs2_str) {
   int i, j = 0;
   int ul = UnicodeLength(ucs2_str);
 
+  /* Worst-case UCS-2 string allocation:
+   *  Original length plus null terminator; two bytes for each
+   *  character; every character escaped with a UCS-2 backslash. */
+
   unsigned char *b =
-    (unsigned char *) malloc_and_zero((2 * ul) * 2 + 2);
+    (unsigned char *) malloc_and_zero((ul + 1) * 2 * 2);
 
   for (i = 0; i < ul; ++i) {
     char msb = ucs2_str[2 * i], lsb = ucs2_str[2 * i + 1];
@@ -222,7 +252,7 @@ char *encode_json_utf8(const unsigned char *ucs2_str) {
   b[j++] = '\0';
 
   /* Worst-case UTF-8:
-   *  Four bytes per character (see RFC3629), plus 1-byte NUL. */
+   *  Four bytes per character (see RFC3629); 1-byte null terminator. */
 
   char *rv = (char *) malloc_and_zero(4 * UnicodeLength(b) + 1);
 
@@ -249,7 +279,7 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
 }
 
 /**
- * @name encode_timestamp_utf8:
+ * @name is_empty_timestamp:
  */
 int is_empty_timestamp(message_timestamp_t *t) {
 
@@ -657,9 +687,13 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
 void _message_transmit_callback(GSM_StateMachine *sm,
 				int status, int ref, void *x) {
 
-  int *send_status = (int *) x;
+  transmit_status_t *s = (transmit_status_t *) x;
+
+  s->finished = TRUE;
+  s->reference_number = ref;
+  s->last_send_status = status;
+  
   fprintf(stderr, "_message_transmit_callback: %d %d\n", status, ref);
-  *send_status = TRUE;
 }
 
 /**
@@ -668,11 +702,27 @@ void _message_transmit_callback(GSM_StateMachine *sm,
 int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   int rv = 0;
+  char **argp = &argv[1];
 
   if (argc <= 2) {
     return usage();
   }
 
+  if (argc % 2 != 1) {
+    fprintf(stderr, "Error: Odd number of arguments provided\n");
+    return usage();
+  }
+
+  smsc_t *smsc =
+    (smsc_t *) malloc_and_zero(sizeof(*smsc));
+
+  multimessage_t *sms =
+    (multimessage_t *) malloc_and_zero(sizeof(*sms));
+
+  multimessage_info_t *info =
+    (multimessage_info_t *) malloc_and_zero(sizeof(*info));
+
+  /* Lazy initialization of libgammu */
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
@@ -680,74 +730,118 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     rv = 1; goto cleanup;
   }
 
-  smsc_t *smsc = (smsc_t *) malloc_and_zero(sizeof(*smsc));
-  message_t *sms = (message_t *) malloc_and_zero(sizeof(*sms));
-
+  /* Find SMSC number */
   smsc->Location = 1;
 
   if ((s->err = GSM_GetSMSC(s->sm, smsc)) != ERR_NONE) {
-    rv = 2; goto cleanup_message;
+    rv = 2; goto cleanup_sms;
   }
 
-  char **argp = &argv[1];
-  int send_status = FALSE;
+  transmit_status_t status;
+  initialize_transmit_status(&status);
 
   GSM_SetSendSMSStatusCallback(
-    s->sm, _message_transmit_callback, &send_status
+    s->sm, _message_transmit_callback, &status
   );
 
+  /* For each message... */
   while (*argp != NULL) {
 
-    CopyUnicodeString(sms->SMSC.Number, smsc->Number);
+    GSM_ClearMultiPartSMSInfo(info);
+    GSM_Debug_Info *debug = GSM_GetGlobalDebug();
 
-    /* MSISDN */
-    utf8_length_info_t pl;
-    char *sms_phone_number = *argp++;
-    utf8_string_length(sms_phone_number, &pl);
+    /* Destination phone number */
+    utf8_length_info_t nl;
+    char *sms_destination_number = *argp++;
+    utf8_string_length(sms_destination_number, &nl);
 
-    /* Missing message? */
+    /* Check size of phone number:
+	We'll be decoding this in to a fixed-sized buffer. */
+
+    if (nl.bytes > 24) {
+      fprintf(
+        stderr, "Error: Phone number `%s' is too long\n",
+	  sms_destination_number
+      );
+      rv = 3; goto cleanup_sms;
+    }
+
+    /* Missing message text:
+        This shouldn't happen since we check `argc` above,
+        but I'm leaving this here in case we refactor later. */
+
     if (*argp == NULL) {
       fprintf(
         stderr, "Error: no message body provided for `%s'\n",
-	  sms_phone_number
+	  sms_destination_number
       );
-      rv = 3; goto cleanup_message;
+      rv = 4; goto cleanup_sms;
       break;
     }
 
-    /* Message content */
+    /* UTF-8 message content */
     utf8_length_info_t ml;
-    char *sms_message_content = *argp++;
-    utf8_string_length(sms_message_content, &ml);
+    char *sms_message = *argp++;
+    utf8_string_length(sms_message, &ml);
 
-    printf("symbols: %d, bytes: %d\n", ml.symbols, ml.bytes);
+    /* Convert message from UTF-8 to UCS-2:
+        Every symbol is two bytes long; the string is then
+        terminated by a single 2-byte UCS-2 null character. */
 
-    DecodeUTF8(sms->Text, sms_message_content, ml.bytes);
-    DecodeUTF8(sms->Number, sms_phone_number, pl.bytes);
+    unsigned char *sms_message_unicode =
+      (unsigned char *) malloc_and_zero((ml.symbols + 1) * 2);
 
-    sms->Class = 1;
-    sms->PDU = SMS_Submit;
-    sms->UDH.Type = UDH_NoUDH;
-    sms->Coding = SMS_Coding_Default_No_Compression;
+    DecodeUTF8(sms_message_unicode, sms_message, ml.bytes);
 
-    if ((s->err = GSM_SendSMS(s->sm, sms)) != ERR_NONE) {
-      rv = 4; goto cleanup_message;
+    /* Prepare message info structure::
+        This information is used to encode the possibly-multipart SMS. */
+
+    info->Class = 1;
+    info->EntriesNum = 1;
+    info->UnicodeCoding = FALSE;
+    info->Entries[0].Buffer = sms_message_unicode;
+    info->Entries[0].ID = SMS_ConcatenatedTextLong;
+
+    if ((s->err = GSM_EncodeMultiPartSMS(debug, info, sms)) != ERR_NONE) {
+      fprintf(stderr, "Error: Failed to encode message");
+      rv = 5; goto cleanup_sms_text;
     }
 
-    for (;;) {
-      GSM_ReadDevice(s->sm, TRUE);
+    /* For each SMS part... */
+    for (int i = 0; i < sms->Number; i++) {
 
-      if (send_status) {
-        break;
+      status.finished = FALSE;
+      sms->SMS[i].PDU = SMS_Submit;
+
+      /* Copy destination phone number:
+           This is a fixed-size buffer; size was already checked above. */
+
+      CopyUnicodeString(sms->SMS[i].SMSC.Number, smsc->Number);
+      DecodeUTF8(sms->SMS[i].Number, sms_destination_number, nl.bytes);
+
+      /* Transmit a single message part */
+      if ((s->err = GSM_SendSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
+        rv = 6; goto cleanup_sms_text;
+      }
+
+      /* Wait for reply */
+      for (;;) {
+        GSM_ReadDevice(s->sm, TRUE);
+
+        if (status.finished) {
+          break;
+        }
       }
     }
 
-    send_status = FALSE;
+    cleanup_sms_text:
+      free(sms_message_unicode);
   }
 
-  cleanup_message:
+  cleanup_sms:
     free(sms);
     free(smsc);
+    free(info);
 
   cleanup:
     return rv;
