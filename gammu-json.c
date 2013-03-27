@@ -200,12 +200,12 @@ int bitfield_set(bitfield_t *bf, unsigned long bit, int value) {
 }
 
 /**
- * @name encode_json_utf8:
+ * @name ucs2_encode_json_utf8:
  */
-char *encode_json_utf8(const unsigned char *ucs2_str) {
+char *ucs2_encode_json_utf8(const unsigned char *s) {
 
   int i, j = 0;
-  int ul = UnicodeLength(ucs2_str);
+  int ul = UnicodeLength(s);
 
   /* Worst-case UCS-2 string allocation:
    *  Original length plus null terminator; two bytes for each
@@ -215,10 +215,10 @@ char *encode_json_utf8(const unsigned char *ucs2_str) {
     (unsigned char *) malloc_and_zero((ul + 1) * 2 * 2);
 
   for (i = 0; i < ul; ++i) {
-    char msb = ucs2_str[2 * i], lsb = ucs2_str[2 * i + 1];
+    unsigned char msb = s[2 * i], lsb = s[2 * i + 1];
     
     if (msb == '\0') {
-      char escape = '\0';
+      unsigned char escape = '\0';
 
       switch (lsb) {
         case '\r':
@@ -276,6 +276,91 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
   );
 
   return rv;
+}
+
+/**
+ * @name ucs2_is_gsm_codepoint:
+ *   Given the most-significant byte `msb` and the least-significant
+ *   byte `lsb` of a UCS-2 character, return TRUE if the character
+ *   can be represented in the default GSM alphabet (described in GSM
+ *   03.38). The GSM-to-Unicode conversion table used here was obtained
+ *   from http://www.unicode.org/Public/MAPPINGS/ETSI/GSM0338.TXT.
+ *
+ *   Copyright (c) 2000 - 2009 Unicode, Inc. All Rights reserved.
+ *   Unicode, Inc. hereby grants the right to freely use the information
+ *   supplied in this file in the creation of products supporting the
+ *   Unicode Standard, and to make copies of this file in any form for
+ *   internal or external distribution as long as this notice remains
+ *   attached.
+ *  
+ */
+int ucs2_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
+
+  switch (msb) {
+
+    case 0x00: {
+      int rv = (
+        (lsb >= 0x20 && lsb <= 0x5f)
+          || (lsb >= 0x61 && lsb <= 0x7e)
+          || (lsb >= 0xa3 && lsb <= 0xa5)
+          || (lsb >= 0xc4 && lsb <= 0xc6)
+          || (lsb >= 0xe4 && lsb <= 0xe9)
+      );
+      if (rv) {
+        return TRUE;
+      }
+      switch (lsb) {
+        case 0x0a: case 0x0c: case 0x0d:
+        case 0xa0: case 0xa1: case 0xa7:
+        case 0xbf: case 0xc9: case 0xd1:
+        case 0xd6: case 0xd8: case 0xdc:
+        case 0xdf: case 0xe0: case 0xec:
+        case 0xf1: case 0xf2: case 0xf6:
+        case 0xf8: case 0xf9: case 0xfc:
+          return TRUE;
+        default:
+          return FALSE;
+      }
+    }
+    case 0x03: {
+      switch (lsb) {
+        case 0x93: case 0x94:
+        case 0x98: case 0x9b:
+        case 0x9e: case 0xa0:
+        case 0xa3: case 0xa6:
+        case 0xa8: case 0xa9:
+          return TRUE;
+        default:
+          return FALSE;
+      }
+    }
+    case 0x20: {
+      return (lsb == 0xac);
+    }
+    default:
+      break;
+  }
+
+  return FALSE;
+}
+
+/**
+ * @name ucs2_is_gsm_string:
+ *   Return true if the UCS-2 string `s` can be represented in
+ *   the GSM default alphabet. The input string should be terminated
+ *   by the UCS-2 null character (i.e. two null bytes).
+ */
+int ucs2_is_gsm_string(const unsigned char *s) {
+
+  int ul = UnicodeLength(s);
+
+  for (int i = 0; i < ul; ++i) {
+    if (!ucs2_is_gsm_codepoint(s[2 * i], s[2 * i + 1])) {
+      return FALSE;
+    }
+  }
+
+  return TRUE;
 }
 
 /**
@@ -393,12 +478,12 @@ int print_message_json_utf8(gammu_state_t *s,
     printf("\"location\": %d, ", sms->SMS[i].Location);
 
     /* Originating phone number */
-    char *from = encode_json_utf8(sms->SMS[i].Number);
+    char *from = ucs2_encode_json_utf8(sms->SMS[i].Number);
     printf("\"from\": \"%s\", ", from);
     free(from);
 
     /* Phone number of telco's SMS service center */
-    char *smsc = encode_json_utf8(sms->SMS[i].SMSC.Number);
+    char *smsc = ucs2_encode_json_utf8(sms->SMS[i].SMSC.Number);
     printf("\"smsc\": \"%s\", ", smsc);
     free(smsc);
 
@@ -447,7 +532,7 @@ int print_message_json_utf8(gammu_state_t *s,
       case SMS_Coding_Default_No_Compression:
       case SMS_Coding_Unicode_No_Compression: {
         printf("\"encoding\": \"utf-8\", ");
-        char *text = encode_json_utf8(sms->SMS[i].Text);
+        char *text = ucs2_encode_json_utf8(sms->SMS[i].Text);
         printf("\"content\": \"%s\", ", text);
         free(text);
         break;
@@ -788,19 +873,19 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
         Every symbol is two bytes long; the string is then
         terminated by a single 2-byte UCS-2 null character. */
 
-    unsigned char *sms_message_unicode =
+    unsigned char *sms_message_ucs2 =
       (unsigned char *) malloc_and_zero((ml.symbols + 1) * 2);
 
-    DecodeUTF8(sms_message_unicode, sms_message, ml.bytes);
+    DecodeUTF8(sms_message_ucs2, sms_message, ml.bytes);
 
     /* Prepare message info structure::
         This information is used to encode the possibly-multipart SMS. */
 
     info->Class = 1;
     info->EntriesNum = 1;
-    info->UnicodeCoding = FALSE;
-    info->Entries[0].Buffer = sms_message_unicode;
+    info->Entries[0].Buffer = sms_message_ucs2;
     info->Entries[0].ID = SMS_ConcatenatedTextLong;
+    info->UnicodeCoding = !ucs2_is_gsm_string(sms_message_ucs2);
 
     if ((s->err = GSM_EncodeMultiPartSMS(debug, info, sms)) != ERR_NONE) {
       fprintf(stderr, "Error: Failed to encode message");
@@ -835,7 +920,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     }
 
     cleanup_sms_text:
-      free(sms_message_unicode);
+      free(sms_message_ucs2);
   }
 
   cleanup_sms:
