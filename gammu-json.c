@@ -81,6 +81,18 @@ typedef struct utf8_length_info {
 } utf8_length_info_t;
 
 /**
+ * @name part_transmit_status_t
+ */
+typedef struct part_transmit_status {
+
+  int status;
+  int reference;
+  const char *err;
+  boolean_t transmitted;
+
+} part_transmit_status_t;
+
+/**
  * @name transmit_status_t
  */
 typedef struct transmit_status {
@@ -92,9 +104,7 @@ typedef struct transmit_status {
   int parts_total;
   int message_index;
   int message_part_index;
-  int part_status[GSM_MAX_MULTI_SMS];
-  int part_reference[GSM_MAX_MULTI_SMS];
-  const char *part_err[GSM_MAX_MULTI_SMS];
+  part_transmit_status_t parts[GSM_MAX_MULTI_SMS];
 
 } transmit_status_t;
 
@@ -150,15 +160,10 @@ transmit_status_t *initialize_transmit_status(transmit_status_t *t) {
   t->message_part_index = 0;
 
   for (int i = 0; i < GSM_MAX_MULTI_SMS; i++) {
-    t->part_err[i] = NULL;
-  }
-
-  for (int i = 0; i < GSM_MAX_MULTI_SMS; i++) {
-    t->part_status[i] = 0;
-  }
-  
-  for (int i = 0; i < GSM_MAX_MULTI_SMS; i++) {
-    t->part_reference[i] = 0;
+    t->parts[i].err = NULL;
+    t->parts[i].status = 0;
+    t->parts[i].reference = 0;
+    t->parts[i].transmitted = FALSE;
   }
 
   return t;
@@ -809,7 +814,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
                                 transmit_status_t *t, boolean_t is_start) {
 
   if (!is_start) {
-    printf(",");
+    printf(", ");
   }
 
   printf("{");
@@ -835,20 +840,28 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
     printf("\"parts_total\": %d, ", t->parts_total);
 
     /* Per-part status codes */
-    printf("\"part_status\": [");
+    printf("\"parts\": [");
 
+    /* Per-part information */
     for (int i = 0; i < t->parts_total; i++) {
-      printf((i == 0 ? "%d" : ", %d"), t->part_status[i]);
+
+      if (i != 0) {
+        printf(", ");
+      }
+
+      printf("{");
+      printf("\"index\": %d, ", i + 1);
+      printf("\"status\": %d, ", t->parts[i].status);
+      printf("\"reference\": %d, ", t->parts[i].reference);
+
+      char *text = ucs2_encode_json_utf8(m->SMS[i].Text);
+      printf("\"content\": \"%s\"", text);
+      free(text);
+
+      printf("}");
     }
     
-    /* Per-part reference numbers */
-    printf("], \"part_reference\": [ ");
-
-    for (int i = 0; i < t->parts_total; i++) {
-      printf((i == 0 ? "%d" : ", %d"), t->part_reference[i]);
-    }
-    
-    printf(" ]");
+    printf("]");
   }
 
   printf("}");
@@ -863,9 +876,13 @@ static void _message_transmit_callback(GSM_StateMachine *sm,
   transmit_status_t *t = (transmit_status_t *) x;
   unsigned int i = t->message_part_index;
 
+  if (status == ERR_NONE) {
+    t->parts[i].transmitted = TRUE;
+  }
+
   t->finished = TRUE;
-  t->part_status[i] = status;
-  t->part_reference[i] = ref;
+  t->parts[i].status = status;
+  t->parts[i].reference = ref;
 }
 
 /**
@@ -997,7 +1014,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
       /* Transmit a single message part */
       if ((s->err = GSM_SendSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
-	status.part_err[i] = "Message transmission failed";
+	status.parts[i].err = "Message transmission failed";
         continue;
       }
 
@@ -1010,8 +1027,8 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
         }
       }
 
-      if (status.part_status[i] != 0) {
-	status.part_err[i] = "Message delivery failed";
+      if (!status.parts[i].transmitted) {
+	status.parts[i].err = "Message delivery failed";
         continue;
       }
 
