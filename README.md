@@ -1,12 +1,11 @@
 `gammu-json`
 ============
 
-A simple command-line interface to the important portions of `libgammu`,
-supporting JSON and UTF-8. Usable now; still under active development.
+A command-line interface to the important portions of `libgammu` that speaks
+JSON and UTF-8. Usable now; still under active development.
 
-Examples
---------
-
+If you want to skip all of this summary-level stuff and go straight to
+[the usage examples](#Examples), we won't be offended.
 
 Summary
 -------
@@ -63,13 +62,15 @@ Currently, `gammu-json` requires that (a) you have a valid `/etc/gammurc` file
 (or symbolic link), and that (b) that file provides a working phone/modem
 configuration in the `gammu` section. Here's a simple example:
 
-``[gammu]
+```
+[gammu]
 Connection = at
-Device = /dev/ttyUSB0``
+Device = /dev/ttyUSB0
+```
 
 Future modifications will remove this requirement, and allow you to provide
-device and configuration information as program arguments. For now, though,
-this is the simplest way to get started.
+device and configuration information as command-line arguments. For now,
+though, creating this file is the simplest way to get started.
 
 Licensing
 ---------
@@ -87,7 +88,22 @@ as a software package, or as software preloaded on a piece of hardware), you
 will be required to offer those modifications (in their original human-readable
 source code form) to whomever obtains the modified software.
 
-Before sending hate mail, please note that Gammu itself (including `libgammu`)
-is licensed under the GPL v2 (or later, presumably at your option).
+Please note that Gammu itself (including the `libgammu` upon which `gammu-json`
+relies) is licensed under the GPL v2 (or later, presumably at your option).
 
+Examples
+--------
+
+```
+$ gammu-json
+Usage: ./gammu-json { retrieve | send { phone text }... | delete N... }
+```
+```json
+$ gammu-json retrieve
+[]
+```
+
+
+Author
+------
 
