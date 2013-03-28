@@ -827,13 +827,39 @@ void print_deletion_detail_json_utf8(message_t *sms,
 void print_deletion_status_json_utf8(delete_status_t *status) {
 
   printf("\"totals\": {");
-  printf("\"requested\": %d, ", status->requested);
+
+  if (status->requested > 0) {
+    printf("\"requested\": %d, ", status->requested);
+  } else {
+    printf("\"requested\": \"all\", ");
+  }
+
   printf("\"examined\": %d, ", status->examined);
   printf("\"attempted\": %d, ", status->attempted);
   printf("\"skipped\": %d, ", status->skipped);
   printf("\"errors\": %d, ", status->errors);
-  printf("\"deleted\": %d", status->deleted);
-  printf("}");
+  printf("\"deleted\": %d, ", status->deleted);
+
+  if (status->deleted == 0) {
+    printf("\"result\": \"none\"");
+    goto json_exit;
+  }
+
+  unsigned int total = (
+    (status->requested == 0) ?
+      status->examined : status->requested
+  );
+
+  if (status->deleted < total) {
+    printf("\"result\": \"partial\"");
+  } else if (status->deleted == total) {
+    printf("\"result\": \"success\"");
+  } else {
+    printf("\"result\": \"internal-error\"");
+  }
+  
+  json_exit:
+    printf("}");
 }
 
 /**
@@ -936,7 +962,10 @@ boolean_t _before_deletion_callback(gammu_state_t *s,
   delete_status_t *status = (delete_status_t *) x;
 
   status->is_start = is_start;
-  status->requested = status->bitfield->total_set;
+
+  if (status->bitfield) {
+    status->requested = status->bitfield->total_set;
+  }
 
   return delete_multimessage(
     s, sms, status->bitfield, _after_deletion_callback, x
