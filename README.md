@@ -1,8 +1,12 @@
-gammu-json
-==========
+`gammu-json`
+============
 
 A simple command-line interface to the important portions of `libgammu`,
 supporting JSON and UTF-8. Usable now; still under active development.
+
+Examples
+--------
+
 
 Summary
 -------
@@ -39,6 +43,19 @@ requires some form of persistent data storage, since each message part could be
 delayed indefinitely. Architecturally speaking, message reassembly will need to
 be performed at a higher level.
 
+Building
+--------
+
+Building `gammu-json` from source can typically be accomplished by running
+`make` and `make install`. The included `Makefile` uses `pkg-config` to locate
+`libgammu`. If you'd like to link with a `libgammu` that isn't under `/usr`,
+try defining the `PREFIX` variable when you run `make`, like this:
+
+``make PREFIX=/srv/software/libgammu``
+
+or, alternatively, set the `PKG_CONFIG_PATH` environment variable to point
+directly to your preferred `$prefix/lib/pkgconfig` directory.
+
 Setup
 -----
 
@@ -53,10 +70,6 @@ Device = /dev/ttyUSB0``
 Future modifications will remove this requirement, and allow you to provide
 device and configuration information as program arguments. For now, though,
 this is the simplest way to get started.
-
-Examples
---------
-
 
 Licensing
 ---------
