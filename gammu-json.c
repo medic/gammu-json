@@ -840,11 +840,13 @@ void print_deletion_status_json_utf8(delete_status_t *status) {
   printf("\"attempted\": %d, ", status->attempted);
   printf("\"skipped\": %d, ", status->skipped);
   printf("\"errors\": %d, ", status->errors);
-  printf("\"deleted\": %d, ", status->deleted);
+  printf("\"deleted\": %d", status->deleted);
+
+  printf("}, ");
 
   if (status->deleted == 0) {
     printf("\"result\": \"none\"");
-    goto json_exit;
+    return;
   }
 
   unsigned int total = (
@@ -859,9 +861,6 @@ void print_deletion_status_json_utf8(delete_status_t *status) {
   } else {
     printf("\"result\": \"internal-error\"");
   }
-  
-  json_exit:
-    printf("}");
 }
 
 /**
