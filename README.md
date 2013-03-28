@@ -94,16 +94,37 @@ relies) is licensed under the GPL v2 (or later, presumably at your option).
 Examples
 --------
 
-```
+### Usage information
+
+```shell
 $ gammu-json
+```
+```
 Usage: ./gammu-json { retrieve | send { phone text }... | delete N... }
 ```
-```json
+
+### Retrieval (empty)
+
+```shell
 $ gammu-json retrieve
+```
+```json
 []
 ```
 
+### Sending (simple)
 
-Author
-------
+```shell
+$ ./gammu-json send '+15038030547' 'This is a simple test message.'
+```json
+[{"index": 1, "result": "success", "parts_sent": 1, "parts_total": 1, "parts": [{"result": "success", "content": "This is a simple test message.", "index": 1, "status": 0, "reference": 250}]}]
+```
+
+Authors
+-------
+
+Copyright (c) 2013 David Brown <hello@scri.pt>
+Copyright (c) 2013 Medic Mobile, Inc. <david@medicmobile.org>
+
+All rights reserved.
 
