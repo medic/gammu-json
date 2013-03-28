@@ -591,6 +591,7 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     printf("}");
   }
 
+  fflush(stdout);
   return TRUE;
 }
 
@@ -745,6 +746,13 @@ int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
 }
 
 /**
+ * @name print_json_delete_status:
+ */
+void print_json_delete_status(gammu_state_t *s) {
+
+}
+
+/**
  * @name action_delete_messages:
  */
 int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
@@ -827,6 +835,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
 
   } else {
 
+    /* Result */
     if (t->parts_sent <= 0) {
       printf("\"result\": \"error\", ");
     } else if (t->parts_sent < t->parts_total) {
@@ -850,13 +859,20 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
       }
 
       printf("{");
+
+      if (t->parts[i].err) {
+        printf("\"result\": \"error\", ");
+        printf("\"error\": \"%s\", ", t->parts[i].err); /* const */
+      } else {
+        printf("\"result\": \"success\", ");
+        char *text = ucs2_encode_json_utf8(m->SMS[i].Text);
+        printf("\"content\": \"%s\", ", text);
+        free(text);
+      }
+
       printf("\"index\": %d, ", i + 1);
       printf("\"status\": %d, ", t->parts[i].status);
-      printf("\"reference\": %d, ", t->parts[i].reference);
-
-      char *text = ucs2_encode_json_utf8(m->SMS[i].Text);
-      printf("\"content\": \"%s\"", text);
-      free(text);
+      printf("\"reference\": %d", t->parts[i].reference);
 
       printf("}");
     }
@@ -865,6 +881,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
   }
 
   printf("}");
+  fflush(stdout);
 }
 
 /**
@@ -876,7 +893,7 @@ static void _message_transmit_callback(GSM_StateMachine *sm,
   transmit_status_t *t = (transmit_status_t *) x;
   unsigned int i = t->message_part_index;
 
-  if (status == ERR_NONE) {
+  if (status == 0) {
     t->parts[i].transmitted = TRUE;
   }
 
@@ -1014,7 +1031,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
       /* Transmit a single message part */
       if ((s->err = GSM_SendSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
-	status.parts[i].err = "Message transmission failed";
+        status.parts[i].err = "Message transmission failed";
         continue;
       }
 
@@ -1028,7 +1045,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
       }
 
       if (!status.parts[i].transmitted) {
-	status.parts[i].err = "Message delivery failed";
+        status.parts[i].err = "Message delivery failed";
         continue;
       }
 
