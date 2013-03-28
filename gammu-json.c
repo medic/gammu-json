@@ -86,6 +86,8 @@ typedef struct utf8_length_info {
 typedef struct transmit_status {
 
   int send_status;
+  const char *err;
+  unsigned int index;
   boolean_t finished;
   int reference_number;
   unsigned int parts_sent;
@@ -136,6 +138,8 @@ utf8_length_info_t *utf8_string_length(const char *str,
  */
 transmit_status_t *initialize_transmit_status(transmit_status_t *s) {
 
+  s->index = 0;
+  s->err = NULL;
   s->parts_sent = 0;
   s->parts_total = 0;
   s->send_status = 0;
@@ -791,10 +795,27 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
   }
 
   printf("{");
-  printf("\"status\": \"%d\", ", t->send_status);
-  printf("\"parts-sent\": \"%d\", ", t->parts_sent);
-  printf("\"parts-total\": \"%d\", ", t->parts_total);
-  printf("\"reference\": \"%d\"", t->reference_number);
+  printf("\"index\": \"%d\", ", t->index);
+
+  if (t->err != NULL) {
+
+    printf("\"result\": \"error\", ");
+    printf("\"error\": \"%s\"", t->err); /* const */
+
+  } else {
+
+    if (t->parts_sent < t->parts_total) {
+      printf("\"result\": \"partial\", ");
+    } else {
+      printf("\"result\": \"success\", ");
+    }
+
+    printf("\"parts-sent\": \"%d\", ", t->parts_sent);
+    printf("\"parts-total\": \"%d\", ", t->parts_total);
+    printf("\"send-status\": \"%d\", ", t->send_status);
+    printf("\"reference-number\": \"%d\"", t->reference_number);
+  }
+
   printf("}");
 }
 
@@ -818,7 +839,6 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   int rv = 0;
   char **argp = &argv[1];
-  boolean_t is_start = TRUE;
 
   if (argc <= 2) {
     return usage();
@@ -829,6 +849,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     return usage();
   }
 
+  /* Allocate */
   smsc_t *smsc =
     (smsc_t *) malloc_and_zero(sizeof(*smsc));
 
@@ -842,7 +863,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    fprintf(stderr, "Error: failed to start gammu\n");
+    fprintf(stderr, "Error: Failed to start gammu subsystem\n");
     rv = 1; goto cleanup;
   }
 
@@ -850,6 +871,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   smsc->Location = 1;
 
   if ((s->err = GSM_GetSMSC(s->sm, smsc)) != ERR_NONE) {
+    fprintf(stderr, "Error: Failed to discover SMSC number\n");
     rv = 2; goto cleanup_sms;
   }
 
@@ -859,6 +881,9 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   GSM_SetSendSMSStatusCallback(
     s->sm, _message_transmit_callback, &status
   );
+
+  boolean_t is_start = TRUE;
+  unsigned int message_index = 0;
 
   printf("[");
 
@@ -876,12 +901,9 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     /* Check size of phone number:
         We'll be decoding this in to a fixed-sized buffer. */
 
-    if (nl.bytes > 24) {
-      fprintf(
-        stderr, "Error: Phone number `%s' is too long\n",
-          sms_destination_number
-      );
-      rv = 3; goto cleanup_transmit_status;
+    if (nl.symbols > GSM_MAX_NUMBER_LENGTH) {
+      status.err = "Phone number is too long";
+      goto cleanup_transmit_status;
     }
 
     /* Missing message text:
@@ -889,12 +911,8 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
         but I'm leaving this here in case we refactor later. */
 
     if (*argp == NULL) {
-      fprintf(
-        stderr, "Error: no message body provided for `%s'\n",
-          sms_destination_number
-      );
-      rv = 4; goto cleanup_transmit_status;
-      break;
+      status.err = "No message body provided";;
+      goto cleanup_transmit_status;
     }
 
     /* UTF-8 message content */
@@ -921,8 +939,8 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     info->UnicodeCoding = !ucs2_is_gsm_string(sms_message_ucs2);
 
     if ((s->err = GSM_EncodeMultiPartSMS(debug, info, sms)) != ERR_NONE) {
-      fprintf(stderr, "Warning: Failed to encode message\n");
-      rv = 5; goto cleanup_sms_text;
+      status.err = "Failed to encode message";;
+      goto cleanup_sms_text;
     }
 
     status.parts_sent = 0;
@@ -959,7 +977,9 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     }
 
     cleanup_sms_text:
+      status.index = ++message_index;
       free(sms_message_ucs2);
+
     cleanup_transmit_status:
       print_json_transmit_status(s, sms, &status, is_start);
       is_start = FALSE;
