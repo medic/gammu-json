@@ -713,13 +713,15 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     printf("\"total_segments\": %d, ", (parts > 0 ? parts : 1));
 
     /* Identifier from user data header */
-    if (sms->SMS[i].UDH.Type != UDH_NoUDH) {
+    if (sms->SMS[i].UDH.Type == UDH_NoUDH) {
+      printf("\"udh\": false, ");
+    } else {
       if (sms->SMS[i].UDH.ID16bit != -1) {
         printf("\"udh\": %d, ", sms->SMS[i].UDH.ID16bit);
-      } else if (sms->SMS[i].UDH.ID16bit != -1) {
+      } else if (sms->SMS[i].UDH.ID8bit != -1) {
         printf("\"udh\": %d, ", sms->SMS[i].UDH.ID8bit);
       } else {
-        printf("\"udh\": false, ");
+        printf("\"udh\": null, ");
       }
     }
 
@@ -1250,7 +1252,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
     DecodeUTF8(sms_message_ucs2, sms_message, ml.bytes);
 
-    /* Prepare message info structure::
+    /* Prepare message info structure:
         This information is used to encode the possibly-multipart SMS. */
 
     info->Class = 1;
@@ -1273,10 +1275,11 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
       status.finished = FALSE;
       status.message_part_index = i;
 
+      sms->SMS[i].PDU = SMS_Submit;
+
       /* Copy destination phone number:
            This is a fixed-size buffer; size was already checked above. */
 
-      sms->SMS[i].PDU = SMS_Submit;
       CopyUnicodeString(sms->SMS[i].SMSC.Number, smsc->Number);
       DecodeUTF8(sms->SMS[i].Number, sms_destination_number, nl.bytes);
 
