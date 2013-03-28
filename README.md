@@ -39,6 +39,21 @@ requires some form of persistent data storage, since each message part could be
 delayed indefinitely. Architecturally speaking, message reassembly will need to
 be performed at a higher level.
 
+Setup
+-----
+
+Currently, `gammu-json` requires that (a) you have a valid `/etc/gammurc` file
+(or symbolic link), and that (b) that file provides a working phone/modem
+configuration in the `gammu` section. Here's a simple example:
+
+``[gammu]
+Connection = at
+Device = /dev/ttyUSB0``
+
+Future modifications will remove this requirement, and allow you to provide
+device and configuration information as program arguments. For now, though,
+this is the simplest way to get started.
+
 Examples
 --------
 
@@ -55,11 +70,11 @@ other people seeing. Your secret's safe with us.
 
 However: if you modify the `gammu-json` software itself, and distribute a
 compiled version containing your modifications to others (either as software,
-or as software preloaded on a piece of hardware), you will be required to offer
-those modifications (in source code form) to whomever obtains the modified
-software.
+as a software package, or as software preloaded on a piece of hardware), you
+will be required to offer those modifications (in their original human-readable
+source code form) to whomever obtains the modified software.
 
 Before sending hate mail, please note that Gammu itself (including `libgammu`)
-is licensed under the GPL v2 or later.
+is licensed under the GPL v2 (or later, presumably at your option).
 
 
