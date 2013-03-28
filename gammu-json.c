@@ -821,6 +821,8 @@ void print_deletion_detail_json_utf8(message_t *sms,
       printf("\"error\"");
       break;
   }
+
+  fflush(stdout);
 }
 
 /**
