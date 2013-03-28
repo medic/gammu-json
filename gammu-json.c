@@ -114,6 +114,7 @@ typedef struct transmit_status {
  */
 typedef struct delete_status {
 
+  boolean_t is_start;
   bitfield_t *bitfield;
 
   unsigned int requested;
@@ -130,11 +131,12 @@ typedef struct delete_status {
  */
 typedef enum {
 
-  DELETION_EXAMINING = 1,
-  DELETION_ATTEMPTING,
-  DELETION_SUCCESS,
-  DELETION_SKIPPED,
-  DELETION_ERROR
+  DELETE_EXAMINING = 1,
+  DELETE_ATTEMPTING,
+  DELETE_RESULT_BARRIER = 32,
+  DELETE_SUCCESS,
+  DELETE_SKIPPED,
+  DELETE_ERROR
 
 } delete_stage_t;
 
@@ -145,42 +147,7 @@ typedef void (*delete_callback_fn_t)(
   gammu_state_t *, message_t *, delete_stage_t, void *
 );
 
-/**
- * @name malloc_and_zero
- */
-static void *malloc_and_zero(int size) {
-
-  void *rv = malloc(size);
-
-  if (!rv) {
-    fprintf(stderr, "Fatal error: failed to allocate %d bytes\n", size);
-    exit(111);
-  }
-
-  memset(rv, '\0', size);
-  return rv;
-}
-
-/**
- * @name utf8_string_length:
- */
-utf8_length_info_t *utf8_string_length(const char *str,
-                                       utf8_length_info_t *i) {
-  const char *p = str;
-  unsigned int bytes = 0, symbols = 0;
-
-  while (*p++) {
-    if ((*p & 0xc0) != 0x80) {
-      symbols++;
-    }
-    bytes++;
-  }
-
-  i->bytes = bytes;
-  i->symbols = symbols;
-
-  return i;
-}
+/** --- **/
 
 /**
  * @name initialize_transmit_status:
@@ -221,6 +188,60 @@ delete_status_t *initialize_delete_status(delete_status_t *d) {
 
   return d;
 }
+
+/** --- **/
+
+/**
+ * @name malloc_and_zero
+ */
+static void *malloc_and_zero(int size) {
+
+  void *rv = malloc(size);
+
+  if (!rv) {
+    fprintf(stderr, "Fatal error: failed to allocate %d bytes\n", size);
+    exit(111);
+  }
+
+  memset(rv, '\0', size);
+  return rv;
+}
+
+/**
+ * @name usage:
+ */
+int usage() {
+
+  fprintf(
+    stderr, "Usage: %s { retrieve | send { phone text }... | delete N... }\n",
+      application_name
+  );
+
+  return 127;
+}
+
+/**
+ * @name utf8_string_length:
+ */
+utf8_length_info_t *utf8_string_length(const char *str,
+                                       utf8_length_info_t *i) {
+  const char *p = str;
+  unsigned int bytes = 0, symbols = 0;
+
+  while (*p++) {
+    if ((*p & 0xc0) != 0x80) {
+      symbols++;
+    }
+    bytes++;
+  }
+
+  i->bytes = bytes;
+  i->symbols = symbols;
+
+  return i;
+}
+
+/** --- **/
 
 /**
  * @name bitfield_create:
@@ -304,6 +325,54 @@ boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t value) {
 }
 
 /**
+ * @name find_maximum_integer_argument:
+ */
+unsigned long find_maximum_integer_argument(char *argv[]) {
+
+  unsigned int rv = 0;
+
+  for (int i = 0; argv[i] != NULL; i++) {
+
+    char *err = NULL;
+    unsigned long n = strtoul(argv[i], &err, 10);
+
+    if (err == NULL || *err != '\0') {
+      continue;
+    }
+
+    if (n > 0 && n > rv) {
+      rv = n;
+    }
+  }
+
+  return rv;
+}
+
+/**
+ * @name bitfield_set_integer_arguments:
+ */
+boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
+
+  for (int i = 0; argv[i] != NULL; i++) {
+
+    char *err = NULL;
+    unsigned long n = strtoul(argv[i], &err, 10);
+
+    if (err == NULL || *err != '\0') {
+      return FALSE;
+    }
+
+    if (!bitfield_set(bf, n, TRUE)) {
+      return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
+/** --- **/
+
+/**
  * @name ucs2_encode_json_utf8:
  *   Copy and transform the string `s` to a newly-allocated
  *   buffer, making it suitable for output as a single utf-8
@@ -323,7 +392,7 @@ char *ucs2_encode_json_utf8(const unsigned char *s) {
 
   for (i = 0; i < ul; ++i) {
     unsigned char msb = s[2 * i], lsb = s[2 * i + 1];
-    
+
     if (msb == '\0') {
       unsigned char escape = '\0';
 
@@ -481,6 +550,8 @@ boolean_t is_empty_timestamp(message_timestamp_t *t) {
   );
 }
 
+/** --- **/
+
 /**
  * @name gammu_create:
  */
@@ -520,6 +591,25 @@ gammu_state_t *gammu_create(const char *config_path) {
 }
 
 /**
+ * @name gammu_create_if_necessary:
+ */
+gammu_state_t *gammu_create_if_necessary(gammu_state_t **sp) {
+
+  if (*sp != NULL) {
+    return *sp;
+  }
+
+  gammu_state_t *rv = gammu_create(NULL);
+
+  if (!rv) {
+    return NULL;
+  }
+
+  *sp = rv;
+  return rv;
+}
+
+/**
  * @name gammu_destroy:
  */
 void gammu_destroy(gammu_state_t *s) {
@@ -529,6 +619,8 @@ void gammu_destroy(gammu_state_t *s) {
 
   free(s);
 }
+
+/** --- **/
 
 /**
  * @name for_each_message:
@@ -555,11 +647,11 @@ boolean_t for_each_message(gammu_state_t *s,
     }
 
     rv = TRUE;
-    
+
     if (!fn(s, sms, start, x)) {
       break;
     }
-    
+
     start = FALSE;
   }
 
@@ -680,10 +772,53 @@ int print_messages_json_utf8(gammu_state_t *s) {
 }
 
 /**
+ * @name action_retrieve_messages:
+ */
+int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
+
+  int rv = 0;
+  gammu_state_t *s = gammu_create_if_necessary(sp);
+
+  if (!s) {
+    fprintf(stderr, "Error: failed to start gammu\n");
+    rv = 1; goto cleanup;
+  }
+
+  if (!print_messages_json_utf8(s)) {
+    fprintf(stderr, "Error: failed to retrieve one or more messages\n");
+    rv = 2; goto cleanup;
+  }
+
+  cleanup:
+    return rv;
+}
+
+/** --- **/
+
+/**
  * @name print_deletion_detail_json_utf8:
  */
 void print_deletion_detail_json_utf8(message_t *sms,
-                                     delete_stage_t result) {
+                                     delete_stage_t r,
+				     boolean_t is_start) {
+  if (!is_start) {
+    printf(", ");
+  }
+
+  printf("\"%d\": ", sms->Location);
+
+  switch (r) {
+    case DELETE_SKIPPED:
+      printf("\"skip\"");
+      break;
+    case DELETE_SUCCESS:
+      printf("\"ok\"");
+      break;
+    default:
+    case DELETE_ERROR:
+      printf("\"error\"");
+      break;
+  }
 }
 
 /**
@@ -708,22 +843,23 @@ void add_deletion_result_to_status(delete_stage_t result,
                                    delete_status_t *status) {
 
   switch (result) {
-    case DELETION_EXAMINING:
+    case DELETE_EXAMINING:
       status->examined++;
       break;
-    case DELETION_SKIPPED:
-      status->skipped++;
-      break;
-    case DELETION_ATTEMPTING:
+    case DELETE_ATTEMPTING:
       status->attempted++;
       break;
-    case DELETION_ERROR:
+    case DELETE_SKIPPED:
+      status->skipped++;
+      break;
+    case DELETE_ERROR:
       status->errors++;
       break;
-    case DELETION_SUCCESS:
+    case DELETE_SUCCESS:
       status->deleted++;
       break;
     default:
+    case DELETE_RESULT_BARRIER:
       fprintf(stderr, "Unhandled deletion result '%d'\n", result);
       break;
   }
@@ -743,30 +879,30 @@ boolean_t delete_multimessage(gammu_state_t *s,
     message_t *m = &sms->SMS[i];
 
     if (callback) {
-      callback(s, m, DELETION_EXAMINING, x);
+      callback(s, m, DELETE_EXAMINING, x);
     }
 
     if (bitfield && !bitfield_test(bitfield, m->Location)) {
       if (callback) {
-        callback(s, m, DELETION_SKIPPED, x);
+        callback(s, m, DELETE_SKIPPED, x);
       }
       continue;
     }
 
     if (callback) {
-      callback(s, m, DELETION_ATTEMPTING, x);
+      callback(s, m, DELETE_ATTEMPTING, x);
     }
 
     if ((s->err = GSM_DeleteSMS(s->sm, m)) != ERR_NONE) {
       if (callback) {
-        callback(s, m, DELETION_ERROR, x);
+        callback(s, m, DELETE_ERROR, x);
       }
       rv = FALSE;
       continue;
     }
 
     if (callback) {
-      callback(s, m, DELETION_SUCCESS, x);
+      callback(s, m, DELETE_SUCCESS, x);
     }
   }
 
@@ -776,16 +912,18 @@ boolean_t delete_multimessage(gammu_state_t *s,
 /**
  * @name _after_deletion_callback:
  */
-void _after_deletion_callback(gammu_state_t *s, message_t *sms,
-                              delete_stage_t result, void *x) {
+void _after_deletion_callback(gammu_state_t *s,
+                              message_t *sms, delete_stage_t r, void *x) {
 
   delete_status_t *status = (delete_status_t *) x;
 
-  /* JSON per-item output */
-  print_deletion_detail_json_utf8(sms, result);
-
   /* Update totals */
-  add_deletion_result_to_status(result, status);
+  add_deletion_result_to_status(r, status);
+
+  /* JSON per-item output */
+  if (r > DELETE_RESULT_BARRIER) {
+    print_deletion_detail_json_utf8(sms, r, status->is_start);
+  }
 };
 
 /**
@@ -794,8 +932,10 @@ void _after_deletion_callback(gammu_state_t *s, message_t *sms,
 boolean_t _before_deletion_callback(gammu_state_t *s,
                                     multimessage_t *sms,
                                     boolean_t is_start, void *x) {
-  
+
   delete_status_t *status = (delete_status_t *) x;
+
+  status->is_start = is_start;
   status->requested = status->bitfield->total_set;
 
   return delete_multimessage(
@@ -809,118 +949,24 @@ boolean_t _before_deletion_callback(gammu_state_t *s,
 boolean_t delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
 
   delete_status_t status;
-  initialize_delete_status(&status);
 
+  initialize_delete_status(&status);
   status.bitfield = bf;
+
+  printf("\"detail\": {");
 
   boolean_t rv = for_each_message(
     s, _before_deletion_callback, (void *) &status
   );
+
+  printf("}, ");
 
   /* JSON summary output */
   print_deletion_status_json_utf8(&status);
   return rv;
 }
 
-/**
- * @name usage:
- */
-int usage() {
-
-  fprintf(
-    stderr, "Usage: %s { retrieve | send { phone text }... | delete N... }\n",
-      application_name
-  );
-
-  return 127;
-}
-
-/**
- * @name find_maximum_integer_argument:
- */
-unsigned long find_maximum_integer_argument(char *argv[]) {
-
-  unsigned int rv = 0;
-
-  for (int i = 0; argv[i] != NULL; i++) {
-
-    char *err = NULL;
-    unsigned long n = strtoul(argv[i], &err, 10);
-
-    if (err == NULL || *err != '\0') {
-      continue;
-    }
-
-    if (n > 0 && n > rv) {
-      rv = n;
-    }
-  }
-
-  return rv;
-}
-
-/**
- * @name bitfield_set_integer_arguments:
- */
-boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
-
-  for (int i = 0; argv[i] != NULL; i++) {
-
-    char *err = NULL;
-    unsigned long n = strtoul(argv[i], &err, 10);
-
-    if (err == NULL || *err != '\0') {
-      return FALSE;
-    }
-
-    if (!bitfield_set(bf, n, TRUE)) {
-      return FALSE;
-    }
-  }
-
-  return TRUE;
-}
-
-/**
- * @name gammu_create_if_necessary:
- */
-gammu_state_t *gammu_create_if_necessary(gammu_state_t **sp) {
-
-  if (*sp != NULL) {
-    return *sp;
-  }
-
-  gammu_state_t *rv = gammu_create(NULL);
-
-  if (!rv) {
-    return NULL;
-  }
-
-  *sp = rv;
-  return rv;
-}
-
-/**
- * @name action_retrieve_messages:
- */
-int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
-
-  int rv = 0;
-  gammu_state_t *s = gammu_create_if_necessary(sp);
-
-  if (!s) {
-    fprintf(stderr, "Error: failed to start gammu\n");
-    rv = 1; goto cleanup;
-  }
-
-  if (!print_messages_json_utf8(s)) {
-    fprintf(stderr, "Error: failed to retrieve one or more messages\n");
-    rv = 2; goto cleanup;
-  }
-
-  cleanup:
-    return rv;
-}
+/** --- **/
 
 /**
  * @name action_delete_messages:
@@ -945,7 +991,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
       rv = usage();
       goto cleanup;
     }
-    
+
     if (n == ULONG_MAX && errno == ERANGE) {
       fprintf(stderr, "Error: integer argument would overflow\n");
       rv = 3; goto cleanup;
@@ -989,6 +1035,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     return rv;
 }
 
+/** --- **/
 
 /**
  * @name print_json_transmit_status:
@@ -1051,7 +1098,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
 
       printf("}");
     }
-    
+
     printf("]");
   }
 
