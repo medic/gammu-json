@@ -56,8 +56,8 @@ typedef uint8_t boolean_t;
 /**
  * @name message_iterate_fn_t
  */
-typedef int (*message_iterate_fn_t)(
-  gammu_state_t *, multimessage_t *, int, void *
+typedef boolean_t (*message_iterate_fn_t)(
+  gammu_state_t *, multimessage_t *, boolean_t, void *
 );
 
 /**
@@ -65,8 +65,9 @@ typedef int (*message_iterate_fn_t)(
  */
 typedef struct bitfield {
 
-  unsigned int n;
   uint8_t *data;
+  unsigned int n;
+  unsigned int total_set;
 
 } bitfield_t;
 
@@ -108,6 +109,41 @@ typedef struct transmit_status {
 
 } transmit_status_t;
 
+/**
+ * @name delete_status_t
+ */
+typedef struct delete_status {
+
+  bitfield_t *bitfield;
+
+  unsigned int requested;
+  unsigned int examined;
+  unsigned int skipped;
+  unsigned int attempted;
+  unsigned int errors;
+  unsigned int deleted;
+
+} delete_status_t;
+
+/**
+ * @name delete_stage_t
+ */
+typedef enum {
+
+  DELETION_EXAMINING = 1,
+  DELETION_ATTEMPTING,
+  DELETION_SUCCESS,
+  DELETION_SKIPPED,
+  DELETION_ERROR
+
+} delete_stage_t;
+
+/**
+ * @name delete_callback_fn_t
+ */
+typedef void (*delete_callback_fn_t)(
+  gammu_state_t *, message_t *, delete_stage_t, void *
+);
 
 /**
  * @name malloc_and_zero
@@ -170,6 +206,23 @@ transmit_status_t *initialize_transmit_status(transmit_status_t *t) {
 }
 
 /**
+ * @name initialize_delete_status:
+ */
+delete_status_t *initialize_delete_status(delete_status_t *d) {
+
+  d->bitfield = NULL;
+  d->requested = 0;
+
+  d->examined = 0;
+  d->skipped = 0;
+  d->attempted = 0;
+  d->errors = 0;
+  d->deleted = 0;
+
+  return d;
+}
+
+/**
  * @name bitfield_create:
  */
 bitfield_t *bitfield_create(unsigned int bits) {
@@ -184,6 +237,7 @@ bitfield_t *bitfield_create(unsigned int bits) {
   }
 
   rv->n = bits;
+  rv->total_set = 0;
   rv->data = (uint8_t *) calloc(cells, BITFIELD_CELL_WIDTH);
 
   return rv;
@@ -217,11 +271,11 @@ boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
 
 /**
  * @name bitfield_set:
- *   Set the one-based bit `bit` to one if `value` is non-zero,
+ *   Set the one-based bit `bit` to one if `value` is true,
  *   otherwise set the bit to zero. Returns true on success, false
  *   if the bit `bit` is out of range for this particular bitfield.
  */
-boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, int value) {
+boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t value) {
 
   if (bit > bf->n) {
     return FALSE;
@@ -230,7 +284,22 @@ boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, int value) {
   unsigned long cell = (bit / BITFIELD_CELL_WIDTH);
   unsigned long offset = (bit % BITFIELD_CELL_WIDTH);
 
-  bf->data[cell] |= (1 << offset);
+  int prev_value = (
+    (bf->data[cell] & (1 << offset)) != 0
+  );
+
+  if (value) {
+    bf->data[cell] |= (1 << offset);
+  } else {
+    bf->data[cell] &= ~(1 << offset);
+  }
+
+  if (value && !prev_value) {
+    bf->total_set++;
+  } else if (prev_value && !value) {
+    bf->total_set--;
+  }
+
   return TRUE;
 }
 
@@ -611,37 +680,145 @@ int print_messages_json_utf8(gammu_state_t *s) {
 }
 
 /**
- * @name delete_single_message:
+ * @name print_deletion_detail_json_utf8:
  */
-boolean_t delete_single_message(gammu_state_t *s,
-                                multimessage_t *sms,
-                                boolean_t is_start, void *x) {
+void print_deletion_detail_json_utf8(message_t *sms,
+                                     delete_stage_t result) {
+}
 
-  bitfield_t *bf = (bitfield_t *) x;
+/**
+ * @name print_deletion_status_json_utf8:
+ */
+void print_deletion_status_json_utf8(delete_status_t *status) {
+
+  printf("\"totals\": {");
+  printf("\"requested\": %d, ", status->requested);
+  printf("\"examined\": %d, ", status->examined);
+  printf("\"attempted\": %d, ", status->attempted);
+  printf("\"skipped\": %d, ", status->skipped);
+  printf("\"errors\": %d, ", status->errors);
+  printf("\"deleted\": %d", status->deleted);
+  printf("}");
+}
+
+/**
+ * @name add_deletion_result_to_status:
+ */
+void add_deletion_result_to_status(delete_stage_t result,
+                                   delete_status_t *status) {
+
+  switch (result) {
+    case DELETION_EXAMINING:
+      status->examined++;
+      break;
+    case DELETION_SKIPPED:
+      status->skipped++;
+      break;
+    case DELETION_ATTEMPTING:
+      status->attempted++;
+      break;
+    case DELETION_ERROR:
+      status->errors++;
+      break;
+    case DELETION_SUCCESS:
+      status->deleted++;
+      break;
+    default:
+      fprintf(stderr, "Unhandled deletion result '%d'\n", result);
+      break;
+  }
+}
+
+/**
+ * @name delete_multimessage:
+ */
+boolean_t delete_multimessage(gammu_state_t *s,
+                              multimessage_t *sms,
+                              bitfield_t *bitfield,
+                              delete_callback_fn_t callback, void *x) {
+  int rv = TRUE;
 
   for (int i = 0; i < sms->Number; i++) {
 
-    if (bf && !bitfield_test(bf, sms->SMS[i].Location)) {
+    message_t *m = &sms->SMS[i];
+
+    if (callback) {
+      callback(s, m, DELETION_EXAMINING, x);
+    }
+
+    if (bitfield && !bitfield_test(bitfield, m->Location)) {
+      if (callback) {
+        callback(s, m, DELETION_SKIPPED, x);
+      }
       continue;
     }
 
-    if ((s->err = GSM_DeleteSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
-      return FALSE;
+    if (callback) {
+      callback(s, m, DELETION_ATTEMPTING, x);
+    }
+
+    if ((s->err = GSM_DeleteSMS(s->sm, m)) != ERR_NONE) {
+      if (callback) {
+        callback(s, m, DELETION_ERROR, x);
+      }
+      rv = FALSE;
+      continue;
+    }
+
+    if (callback) {
+      callback(s, m, DELETION_SUCCESS, x);
     }
   }
 
-  return TRUE;
+  return rv;
 }
+
+/**
+ * @name _after_deletion_callback:
+ */
+void _after_deletion_callback(gammu_state_t *s, message_t *sms,
+                              delete_stage_t result, void *x) {
+
+  delete_status_t *status = (delete_status_t *) x;
+
+  /* JSON per-item output */
+  print_deletion_detail_json_utf8(sms, result);
+
+  /* Update totals */
+  add_deletion_result_to_status(result, status);
+};
+
+/**
+ * @name _before_deletion_callback:
+ */
+boolean_t _before_deletion_callback(gammu_state_t *s,
+                                    multimessage_t *sms,
+                                    boolean_t is_start, void *x) {
+  
+  delete_status_t *status = (delete_status_t *) x;
+  status->requested = status->bitfield->total_set;
+
+  return delete_multimessage(
+    s, sms, status->bitfield, _after_deletion_callback, x
+  );
+};
 
 /**
  * @name delete_selected_messages:
  */
 boolean_t delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
 
+  delete_status_t status;
+  initialize_delete_status(&status);
+
+  status.bitfield = bf;
+
   boolean_t rv = for_each_message(
-    s, (message_iterate_fn_t) delete_single_message, (void *) bf
+    s, _before_deletion_callback, (void *) &status
   );
 
+  /* JSON summary output */
+  print_deletion_status_json_utf8(&status);
   return rv;
 }
 
@@ -696,7 +873,7 @@ boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
       return FALSE;
     }
 
-    if (!bitfield_set(bf, n, 1)) {
+    if (!bitfield_set(bf, n, TRUE)) {
       return FALSE;
     }
   }
@@ -743,13 +920,6 @@ int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   cleanup:
     return rv;
-}
-
-/**
- * @name print_json_delete_status:
- */
-void print_json_delete_status(gammu_state_t *s) {
-
 }
 
 /**
@@ -801,10 +971,15 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     rv = 6; goto cleanup_delete;
   }
 
+  printf("{");
+
   if (!delete_selected_messages(s, bf)) {
     fprintf(stderr, "Error: failed to delete one or more messages\n");
-    rv = 7; goto cleanup_delete;
+    rv = 7; goto cleanup_json;
   }
+
+  cleanup_json:
+    printf("}\n");
 
   cleanup_delete:
     if (bf) {
