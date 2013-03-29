@@ -169,7 +169,8 @@ $ gammu-json send \
       "status": 0,
       "content": "This is a simple test message.",
       "result": "success"
-     },
+     }
+    ]
   },
   {
     "parts_sent": 1,
