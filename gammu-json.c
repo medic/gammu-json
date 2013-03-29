@@ -11,7 +11,15 @@
 #define TIMESTAMP_MAX_WIDTH (64)
 #define BITFIELD_CELL_WIDTH (CHAR_BIT)
 
-static char *application_name;
+/**
+ * @name gammu_state_t
+ */
+typedef struct app_options {
+
+  char *application_name;
+  char *gammu_configuration_path;
+
+} app_options_t;
 
 /**
  * @name gammu_state_t
@@ -189,6 +197,21 @@ delete_status_t *initialize_delete_status(delete_status_t *d) {
   return d;
 }
 
+/**
+ * @name initialize_application_options:
+ */
+app_options_t *initialize_application_options(app_options_t *o) {
+
+  o->application_name = NULL;
+  o->gammu_configuration_path = NULL;
+
+  return o;
+}
+
+/** --- **/
+
+static app_options_t app; /* global */
+
 /** --- **/
 
 /**
@@ -210,11 +233,11 @@ static void *malloc_and_zero(int size) {
 /**
  * @name usage:
  */
-int usage() {
+static int usage() {
 
   fprintf(
     stderr, "Usage: %s { retrieve | send { phone text }... | delete N... }\n",
-      application_name
+      app.application_name
   );
 
   return 127;
@@ -571,23 +594,28 @@ gammu_state_t *gammu_create(const char *config_path) {
   s->sm = GSM_AllocStateMachine();
 
   if ((s->err = GSM_FindGammuRC(&ini, config_path)) != ERR_NONE) {
-    return s;
+    goto failure;
   }
 
   GSM_Config *cfg = GSM_GetConfig(s->sm, 0);
 
   if ((s->err = GSM_ReadConfig(ini, cfg, 0)) != ERR_NONE) {
-    return s;
+    goto failure;
   }
 
   INI_Free(ini);
   GSM_SetConfigNum(s->sm, 1);
 
   if ((s->err = GSM_InitConnection(s->sm, 1)) != ERR_NONE) {
-    return s;
+    goto failure;
   }
 
+  /* Success */
   return s;
+
+  failure:
+    free(s);
+    return NULL;
 }
 
 /**
@@ -599,7 +627,7 @@ gammu_state_t *gammu_create_if_necessary(gammu_state_t **sp) {
     return *sp;
   }
 
-  gammu_state_t *rv = gammu_create(NULL);
+  gammu_state_t *rv = gammu_create(app.gammu_configuration_path);
 
   if (!rv) {
     return NULL;
@@ -782,7 +810,7 @@ int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    fprintf(stderr, "Error: failed to start gammu\n");
+    fprintf(stderr, "Error: failed to start gammu; check configuration\n");
     rv = 1; goto cleanup;
   }
 
@@ -1063,6 +1091,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     if (bf) {
       bitfield_destroy(bf);
     }
+
   cleanup:
     return rv;
 }
@@ -1327,39 +1356,76 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 }
 
 /**
+ * @name parse_global_arguments:
+ */
+int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
+
+  int rv = 0;
+  char **argp = argv;
+
+  while (*argp != NULL) {
+
+    if (strcmp(*argp, "-c") == 0 || strcmp(*argp, "--config") == 0) {
+
+      if (*++argp == NULL) {
+	fprintf(stderr, "Error: no configuration file name provided\n");
+	return usage();
+      }
+
+      o->gammu_configuration_path = *argp++;
+      rv += 2;
+
+      continue;
+    }
+
+    break;
+  }
+
+  return rv;
+}
+
+/**
  * @name main:
  */
 int main(int argc, char *argv[]) {
 
   int rv = 0;
-  gammu_state_t *s = NULL;
-  /* global */ application_name = argv[0];
+  char **argp = argv;
 
-  if (argc <= 1) {
+  gammu_state_t *s = NULL;
+  initialize_application_options(&app);
+
+  argc -= 1;
+  app.application_name = *argp++;
+
+  int n = parse_global_arguments(argc, argp, &app);
+  argc -= n; argp += n;
+
+  if (argc < 1) {
     return usage();
   }
 
   /* Option #1:
    *   Retrieve all messages as a JSON array. */
 
-  if (strcmp(argv[1], "retrieve") == 0) {
-    rv = action_retrieve_messages(&s, argc, argv);
+  if (strcmp(argp[0], "retrieve") == 0) {
+    rv = action_retrieve_messages(&s, argc, argp);
     goto cleanup;
   }
 
   /* Option #2:
    *   Delete messages specified in `argv` (or all messages). */
 
-  if (strcmp(argv[1], "delete") == 0) {
-    rv = action_delete_messages(&s, argc - 1, &argv[1]);
+  if (strcmp(argp[0], "delete") == 0) {
+    rv = action_delete_messages(&s, argc, argp);
     goto cleanup;
   }
 
   /* Option #3:
    *   Send one or more messages, each to a single recipient. */
 
-  if (strcmp(argv[1], "send") == 0) {
-    rv = action_send_messages(&s, argc - 1, &argv[1]);
+  if (strcmp(argp[0], "send") == 0) {
+    rv = action_send_messages(&s, argc, argp);
     goto cleanup;
   }
 

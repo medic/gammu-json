@@ -1,6 +1,6 @@
 
 LDFLAGS := -lm
-CFLAGS := -Wall -std=c99 -Os -g
+CFLAGS := -Wall -std=c99 -g
 
 PREFIX ?= /usr
 PKG_CONFIG = PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:$(PREFIX)/lib/pkgconfig" pkg-config
