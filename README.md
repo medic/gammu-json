@@ -118,16 +118,105 @@ $ gammu-json retrieve
 
 ### Sending (simple)
 
+Sending a single message is easy. Note that JSON output is reformatted here
+to improve readability.
+
 ```shell
-$ ./gammu-json send '+1-503-555-1212' 'This is a simple test message.'
+$ ./gammu-json send '+15035551212' 'This is a simple test message.'
 ```
 ```json
 [
- {"index": 1, "result": "success", "parts_sent": 1, "parts_total": 1, "parts": [
-    {"result": "success", "content": "This is a simple test message.", "index": 1, "status": 0, "reference": 250}
-  ]}
+  {
+    "parts_sent": 1,
+    "index": 1,
+    "parts_total": 1,
+    "parts": [
+     {
+      "index": 1,
+      "reference": 250,
+      "status": 0,
+      "content": "This is a simple test message.",
+      "result": "success"
+     }
+    ],
+    "result": "success"
+  }
 ]
 ```
+### Sending (multipart concatenated messages)
+
+A message that is too long for a single SMS (160 characters for the 7-bit GSM
+default alphabet, or 80 for UCS-2 coding of Unicode symbols) will be split in
+to a concatenated/multipart message automatically.
+
+```shell
+$ gammu-json send '5035551212' 'This is a simple test message. This is only a test. Had this been an actual message, the authorities in your area (with cooperation from federal and state authorities) would have already read it for you.'
+```
+```json
+[
+  {
+    "parts_sent" : 2,
+    "index" : 1,
+    "parts_total" : 2,
+    "parts" : [
+     {
+      "index" : 1,
+      "reference" : 251,
+      "status" : 0,
+      "content" : "This is a simple test message. This is only a test. Had this been an actual message, the authorities in your area (with cooperation from federal and stat",
+      "result" : "success"
+     },
+     {
+      "index" : 2,
+      "reference" : 252,
+      "status" : 0,
+      "content" : "e authorities) would have already read it for you.",
+      "result" : "success"
+     }
+    ],
+    "result" : "success"
+  }
+]
+```
+
+### Sending (in UCS-2)
+
+If a message contains any UTF-8 character that is not present in the 7-bit
+default GSM alphabet, the message will automatically be sent as a two byte per
+character UCS-2 SMS.
+```shell
+$ ./gammu-json send '+15035551212' 'This is a test message. الحروف عربية. ان شاء الله.'
+```
+```json
+[
+  {
+    "parts_sent": 1,
+    "index": 1,
+    "parts_total": 1,
+    "parts": [
+       {
+          "index" : 1,
+          "reference" : 254,
+          "status" : 0,
+          "content" : "This is a test message. الحروف عربية. ان شاء الله.",
+          "result" : "success"
+       }
+    ],
+    "result": "success"
+  }
+]
+```
+
+### Sending (multipart UCS-2 messages)
+
+For UCS-2 messages, messages will be sent in multiple parts after only 80
+characters (rather than the usual limit of 160).
+
+```shell
+```
+```json
+```
+
 
 Authors
 -------
