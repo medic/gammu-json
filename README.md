@@ -94,32 +94,25 @@ relies) is licensed under the GPL v2 (or later, presumably at your option).
 Examples
 --------
 
-### Usage information
+### Usage
+
+Note: JSON output is reformatted here (and in all other examples) to improve
+readability. If you'd like the results of `gammu-json` to be automatically
+indented (i.e. "pretty-printed") for your application, you can pipe its output
+to your favorite formatting utility.
 
 ```shell
 $ gammu-json
 ```
 ```
-Usage: ./gammu-json { retrieve | send { phone text }... | delete N... }
+Usage:
+  gammu-json { retrieve | send { phone text }... | delete N... }
 ```
 
-### Retrieval (empty)
-
-Retrieving messages from a new/blank SMS modem yields the empty JSON set, and
-exits with zero status. The program will display an error message on `stderr`
-and exit with a non-zero status if something goes wrong.
-
-```shell
-$ gammu-json retrieve
-```
-```json
-[]
-```
 
 ### Sending (simple)
 
-Sending a single message is easy. Note that JSON output is reformatted here
-to improve readability.
+Sending a single message is easy.
 
 ```shell
 $ ./gammu-json send '+15035551212' 'This is a simple test message.'
@@ -143,47 +136,92 @@ $ ./gammu-json send '+15035551212' 'This is a simple test message.'
   }
 ]
 ```
-### Sending (multipart concatenated messages)
 
-A message that is too long for a single SMS (160 characters for the 7-bit GSM
-default alphabet, or 80 for UCS-2 coding of Unicode symbols) will be split in
-to a concatenated/multipart message automatically.
+### Sending (multiple messages)
+
+Sending more than one message is also easy.
 
 ```shell
-$ gammu-json send '5035551212' 'This is a simple test message. This is only a test. Had this been an actual message, the authorities in your area (with cooperation from federal and state authorities) would have already read it for you.'
+$ ./gammu-json send \
+  '+15035551212' 'This is a simple test message.' \
+  '+15035551212' 'This is another simple test message.'
 ```
 ```json
 [
   {
-    "parts_sent" : 2,
-    "index" : 1,
-    "parts_total" : 2,
-    "parts" : [
+    "parts_sent": 1,
+    "index": 1,
+    "parts_total": 1,
+    "parts": [
      {
-      "index" : 1,
-      "reference" : 251,
-      "status" : 0,
-      "content" : "This is a simple test message. This is only a test. Had this been an actual message, the authorities in your area (with cooperation from federal and stat",
-      "result" : "success"
+      "index": 1,
+      "reference": 250,
+      "status": 0,
+      "content": "This is a simple test message.",
+      "result": "success"
      },
+  },
+  {
+    "parts_sent": 1,
+    "index": 2,
+    "parts_total": 1,
+    "parts": [
      {
-      "index" : 2,
-      "reference" : 252,
-      "status" : 0,
-      "content" : "e authorities) would have already read it for you.",
-      "result" : "success"
+      "index": 1,
+      "reference": 251,
+      "status": 0,
+      "content": "This is another simple test message.",
+      "result": "success"
      }
     ],
-    "result" : "success"
+    "result": "success"
   }
 ]
 ```
 
-### Sending (in UCS-2)
+### Sending (multipart concatenated messages)
+
+A message that is too long for a single SMS (160 characters for the 7-bit GSM
+default alphabet, or 80 for UCS-2 coding of Unicode symbols) will be split in
+to a concatenated/multipart message automatically. Information about how the
+message was split will be returned in the JSON output (see the _parts_ array).
+
+```shell
+$ gammu-json send '+15035551212' 'This is a simple test message. This is only a test. Had this been an actual message, the authorities in your area (with cooperation from federal and state authorities) would have already read it for you.'
+```
+```json
+[
+  {
+    "parts_sent": 2,
+    "index": 1,
+    "parts_total": 2,
+    "parts": [
+     {
+      "index": 1,
+      "reference": 251,
+      "status": 0,
+      "content": "This is a simple test message. This is only a test. Had this been an actual message, the authorities in your area (with cooperation from federal and stat",
+      "result": "success"
+     },
+     {
+      "index": 2,
+      "reference": 252,
+      "status": 0,
+      "content": "e authorities) would have already read it for you.",
+      "result": "success"
+     }
+    ],
+    "result": "success"
+  }
+]
+```
+
+### Sending (Unicode characters in UTF-8 or UCS-2)
 
 If a message contains any UTF-8 character that is not present in the 7-bit
 default GSM alphabet, the message will automatically be sent as a two byte per
 character UCS-2 SMS.
+
 ```shell
 $ ./gammu-json send '+15035551212' 'This is a test message. الحروف عربية. ان شاء الله.'
 ```
@@ -195,11 +233,11 @@ $ ./gammu-json send '+15035551212' 'This is a test message. الحروف عرب�
     "parts_total": 1,
     "parts": [
        {
-          "index" : 1,
-          "reference" : 254,
-          "status" : 0,
-          "content" : "This is a test message. الحروف عربية. ان شاء الله.",
-          "result" : "success"
+          "index": 1,
+          "reference": 254,
+          "status": 0,
+          "content": "This is a test message. الحروف عربية. ان شاء الله.",
+          "result": "success"
        }
     ],
     "result": "success"
@@ -210,19 +248,263 @@ $ ./gammu-json send '+15035551212' 'This is a test message. الحروف عرب�
 ### Sending (multipart UCS-2 messages)
 
 For UCS-2 messages, messages will be sent in multiple parts after only 80
-characters (rather than the usual limit of 160).
+characters (rather than the usual limit of 160). To see the UCS-2 message size
+limitation in action, try this example again after removing the obvious
+non-Latin characters.
+
 
 ```shell
+$ ./gammu-json send '+15035551212' 'The portion before this contains only Latin characters. Nepali text follows this. हो'
 ```
 ```json
+[
+ {
+  "parts_sent": 2,
+  "index": 1,
+  "parts_total": 2,
+  "parts": [
+     {
+        "index": 1,
+        "reference": 2,
+        "status": 0,
+        "content": "The portion before this contains only Latin characters. Nepali text",
+        "result": "success"
+     },
+     {
+        "index": 2,
+        "reference": 3,
+        "status": 0,
+        "content": " follows this. हो",
+        "result": "success"
+     }
+  ],
+  "result": "success"
+ }
+]
 ```
 
+### Retrieval (empty)
+
+Retrieving messages from a newly-purchased SMS modem yields the empty JSON
+array, and exits with zero status. The program will display an error message
+on `stderr` and exit with a non-zero status if something goes wrong.
+
+```shell
+$ gammu-json retrieve
+```
+```json
+[]
+```
+
+### Retrieval (simple)
+
+After running the `retrieve` command, a JSON-encoded array of message objects
+is returned on `stdout`. The phone number for the sender and "short message
+service center" (SMSC) are each included, along with a receive timestamp, an
+SMSC receive timestamp (if available), location number (on the SMS modem), user
+data header (UDH) value, and segment information (in this case, one of one).
+
+```json
+[
+ {
+  "location" : 1,
+  "smsc" : "+12085552222",
+  "content" : "This is a test message.",
+  "segment" : 1,
+  "inbox" : true,
+  "smsc_timestamp" : false,
+  "folder" : 1,
+  "udh" : false,
+  "timestamp" : "2013-04-02 17:05:49",
+  "from" : "+15035551212",
+  "total_segments" : 1,
+  "encoding" : "utf-8"
+ },
+ {
+  "location" : 2,
+  "smsc" : "+12085552222",
+  "content" : "This is another test message.",
+  "segment" : 1,
+  "inbox" : true,
+  "smsc_timestamp" : false,
+  "folder" : 1,
+  "udh" : false,
+  "timestamp" : "2013-04-02 17:06:03",
+  "from" : "+15155551111",
+  "total_segments" : 1,
+  "encoding" : "utf-8"
+ }
+]
+
+```
+### Retrieval (multipart messages)
+
+Multipart messages are returned in multiple segments, tied together by
+the sender's phone number in `from`, and the user data header value in
+`udh`. Single-part messages will have a `udh` value of false. Multipart
+messages that are _missing_ the proper header information will have a
+`udh` value of `null`.
+
+```json
+[
+ {
+  "location" : 1,
+  "smsc" : "+12085032222",
+  "content" : "This is a simple test message. This is only a test. Had this been an actual message, the authorities in your area (with cooperation from federal and stat",
+  "segment" : 1,
+  "inbox" : true,
+  "smsc_timestamp" : false,
+  "folder" : 1,
+  "udh" : 215,
+  "timestamp" : "2013-04-02 17:12:40",
+  "from" : "+15035551212",
+  "total_segments" : 3,
+  "encoding" : "utf-8"
+ },
+ {
+  "location" : 2,
+  "smsc" : "+12085032222",
+  "content" : "e authorities) would have already read it for you. This is a simple test message. This is only a test. Had this been an actual message, the authorities i",
+  "segment" : 2,
+  "inbox" : true,
+  "smsc_timestamp" : false,
+  "folder" : 1,
+  "udh" : 215,
+  "timestamp" : "2013-04-02 17:12:52",
+  "from" : "+15035551212",
+  "total_segments" : 3,
+  "encoding" : "utf-8"
+ },
+ {
+  "location" : 3,
+  "smsc" : "+12085032222",
+  "content" : "n your area (with cooperation from federal and state authorities) would have already read it for you.This is a simple test message. This is only a test.",
+  "segment" : 3,
+  "inbox" : true,
+  "smsc_timestamp" : false,
+  "folder" : 1,
+  "udh" : 215,
+  "timestamp" : "2013-04-02 17:12:59",
+  "from" : "+15035551212",
+  "total_segments" : 3,
+  "encoding" : "utf-8"
+ },
+ {
+  "location" : 4,
+  "smsc" : "+12085032222",
+  "content" : "This is a short message.",
+  "segment" : 1,
+  "inbox" : true,
+  "smsc_timestamp" : false,
+  "folder" : 1,
+  "udh" : false,
+  "timestamp" : "2013-04-02 17:13:56",
+  "from" : "+15035551212",
+  "total_segments" : 1,
+  "encoding" : "utf-8"
+ }
+]
+```
+### Deletion (simple)
+
+This example assumes there are seven messages stored on the SMS modem,
+numbered one through seven.
+
+```shell
+$ gammu-json delete all
+```
+```json
+{
+ "detail" : {
+   "1" : "ok",
+   "2" : "ok",
+   "3" : "ok",
+   "4" : "ok",
+   "5" : "ok",
+   "6" : "ok",
+   "7" : "ok"
+   },
+ "result" : "success",
+ "totals" : {
+   "errors" : 0,
+   "requested" : "all",
+   "deleted" : 7,
+   "attempted" : 7,
+   "examined" : 7,
+   "skipped" : 0
+  }
+}
+```
+### Deletion (selective)
+
+This example assumes that there are twelve messages (or message segments),
+numbered one through twelve.  Message numbers are one-based integer
+identifiers, and are returned in the `gammu-json retrieve` output as the
+`location` property. Currently, `gammu-json` always deletes from folder zero,
+which contains all available messages on the phone/modem.
+
+```shell
+$ gammu-json delete 3 1 4 5 9
+```
+```json
+{
+ "detail" : {
+  "1" : "ok",
+  "2" : "skip",
+  "3" : "ok",
+  "4" : "ok",
+  "5" : "ok",
+  "6" : "skip",
+  "7" : "skip",
+  "8" : "skip",
+  "9" : "ok",
+  "10" : "skip",
+  "11" : "skip",
+  "12" : "skip"
+ },
+ "result" : "success",
+ "totals" : {
+  "errors" : 0,
+  "requested" : 5,
+  "deleted" : 5,
+  "attempted" : 5,
+  "examined" : 12,
+  "skipped" : 7
+ }
+}
+```
+
+### Deletion (of non-existent messages)
+
+This example assumes that there are four messages (or message segments),
+numbered one to four. Deleting non-existent messages is not an error;
+rather the nonexistent messages are noted in the `totals.attempted`
+property, and the `result` of the deletion is reported as `partial`.
+
+```json
+{
+   "detail" : {
+      "1" : "ok",
+      "2" : "ok",
+      "3" : "ok",
+      "4" : "skip"
+   },
+   "result" : "partial",
+   "totals" : {
+      "errors" : 0,
+      "requested" : 6,
+      "deleted" : 3,
+      "attempted" : 3,
+      "examined" : 4,
+      "skipped" : 1
+   }
+}
+```
 
 Authors
 -------
 
 Copyright (c) 2013 David Brown <hello@scri.pt>
-Copyright (c) 2013 Medic Mobile, Inc. <david@medicmobile.org>
 
-All rights reserved.
+Copyright (c) 2013 Medic Mobile, Inc. <david@medicmobile.org>
 
