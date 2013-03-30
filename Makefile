@@ -1,6 +1,8 @@
 
+C99 = -std=c99
+
 LDFLAGS := -lm
-CFLAGS := -Wall -std=c99 -g
+CFLAGS := -Wall -Os -g
 
 PREFIX ?= /usr
 PKG_CONFIG = PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:$(PREFIX)/lib/pkgconfig" pkg-config
@@ -11,7 +13,7 @@ GAMMU_CFLAGS := $(shell $(PKG_CONFIG) --cflags gammu 2>/dev/null)
 all: gammu-json
 
 gammu-json:
-	gcc -o gammu-json gammu-json.c $(CFLAGS) $(LDFLAGS) $(GAMMU_CFLAGS) $(GAMMU_LDFLAGS)
+	gcc -o gammu-json gammu-json.c $(C99) $(CFLAGS) $(LDFLAGS) $(GAMMU_CFLAGS) $(GAMMU_LDFLAGS)
 
 clean:
 	rm -f gammu-json
