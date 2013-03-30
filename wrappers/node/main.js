@@ -16,6 +16,7 @@ exports.prototype = {
      *   Set environment variable using a callback.
      */
     _setenv: function (_key, _callback) {
+
       process.env[_key] = _callback(process.env[_key])
     },
 
@@ -23,6 +24,80 @@ exports.prototype = {
      * @name _start_polling:
      */
     _start_polling: function () {
+      
+      this._is_polling = true;
+      this._handle_polling_timeout();
+
+      return this;
+    },
+
+    /**
+     * @name _stop_polling:
+     */
+    _stop_polling: function () {
+
+      this._is_polling = false;
+    },
+
+
+    /**
+     * @name _handle_polling_timeout:
+     */
+    _handle_polling_timeout: function () {
+
+      var self = this;
+
+      /* Check for termination */
+      if (!self._is_polling) {
+        return false;
+      }
+
+      /* Queue processing:
+          Send messages, receive messages, then schedule next run. */
+
+      async.waterfall([
+        function (_next_fn) {
+          self._send_messages(_next_fn);
+        },
+        function (_next_fn) {
+          self._receive_messages(_next_fn);
+        }
+      ], function (_err) {
+        if (self._is_polling) {
+          setTimeout(
+	    _.bind(self._handle_polling_timeout, self),
+	      self._poll_interval
+	  );
+        }
+      });
+
+      return true;
+    },
+
+    /**
+     * @name _send_messages:
+     */
+    _send_messages: function (_callback) {
+
+      var self = this;
+
+      if (self._outbound_messages.length <= 0) {
+        return _callback();
+      }
+
+      return _callback();
+    },
+
+    /**
+     * @name _receive_messages:
+     */
+    _receive_messages: function (_callback) {
+
+      var self = this;
+
+      self._subprocess('gammu-json', [ 'retrieve' ], function (_err, _rv) {
+        return _callback();
+      });
     },
 
     /**
@@ -32,9 +107,19 @@ exports.prototype = {
 
       var self = this;
 
+      var options = (_options || {});
+
       self._handlers = {};
+      self._options = options;
       self._outbound_messages = {};
-      self._options = (_options || {});
+
+      self._is_polling = false;
+      self._is_processing = false;
+
+      self._poll_interval = (
+        _.isNumber(options.interval) ?
+	  (options.interval * 1000) : 10000 /* Seconds to milliseconds */
+      );
 
       /* Caller-provided prefix:
           If provided, add $PREFIX/bin to the environment's $PATH. */
@@ -159,8 +244,4 @@ m.on('transmit', function () {
 });
 
 m.start();
-
-m._subprocess('gammu-json', [ 'retrieve' ], function (_err, _rv) {
-  process.stdout.write(jsdump.parse(_rv));
-});
 
