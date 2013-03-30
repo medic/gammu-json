@@ -235,11 +235,38 @@ static void *malloc_and_zero(int size) {
  */
 static int usage() {
 
-  fprintf(
-    stderr, "Usage: %s { retrieve | send { phone text }... | delete N... }\n",
-      app.application_name
-  );
+  const char *usage = 
+  "\n"
+  "Usage:\n"
+  "  %s [global-options] [command] [args]...\n"
+  "\n"
+  "Global options:\n"
+  "\n"
+  "  -c, --config <file>        Specify path to Gammu configuration file\n"
+  "                             (default: /etc/gammurc)\n"
+  "Commands:\n"
+  "\n"
+  "  retrieve                   Retrieve all messages from a device, as a\n"
+  "                             JSON-encoded array of objects, on stdout.\n"
+  "\n"
+  "  delete { all | N... }      Delete one or more messages from a device.\n"
+  "                             Print JSON-encoded information about any\n"
+  "                             deleted/skipped/missing messages on stdout.\n"
+  "\n"
+  "  send { phone text }...     Send one or more messages. Each message is\n"
+  "                             sent to exactly one phone number. Print\n"
+  "                             JSON-encoded information about the sent\n"
+  "                             messages on stdout.\n"
+  "About:\n"
+  "\n"
+  "  Copyright (c) 2013 David Brown <hello at scri.pt>.\n"
+  "  Copyright (c) 2013 Medic Mobile, Inc. <david at medicmobile.org>\n"
+  "\n"
+  "  Released under the GNU General Public License, version three.\n"
+  "  For more information, see <http://github.com/browndav/gammu-json>.\n"
+  "\n";
 
+  fprintf(stderr, usage, app.application_name);
   return 127;
 }
 
