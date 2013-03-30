@@ -1,0 +1,19 @@
+{
+  "name": "node-gammu-json",
+  "version": "0.0.1",
+  "description": "A Node.js wrapper for the gammu-json messaging utility",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo 'No tests available yet' && exit 1"
+  },
+  "dependencies": {
+    "async": "0.x",
+    "moment": "2.x",
+    "jsDump": "1.x",
+    "underscore": "1.x"
+  },
+  "readme": "README.md",
+  "repository": "http://github.com/browndav/gammu-json.git",
+  "author": "David Brown <david@medicmobile.org>",
+  "license": "MIT"
+}
