@@ -1071,8 +1071,9 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   bitfield_t *bf = NULL;
 
   if (argc < 2) {
-    fprintf(stderr, "Error: no valid location(s) specified\n");
-    return usage();
+    usage();
+    fprintf(stderr, "Error: deletion location(s) must be specified\n");
+    return 1;
   }
 
   int delete_all = (strcmp(argv[1], "all") == 0);
@@ -1099,7 +1100,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     }
 
     if (!bitfield_set_integer_arguments(bf, &argv[1])) {
-      fprintf(stderr, "Error: failed to add item(s) to deletion index\n");
+      fprintf(stderr, "Error: one or more location(s) are invalid\n");
       rv = 5; goto cleanup_delete;
     }
   }
@@ -1228,13 +1229,15 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   char **argp = &argv[1];
 
   if (argc <= 2) {
+    usage();
     fprintf(stderr, "Error: Not enough arguments provided\n");
-    return usage();
+    return 1;
   }
 
   if (argc % 2 != 1) {
+    usage();
     fprintf(stderr, "Error: Odd number of arguments provided\n");
-    return usage();
+    return 2;
   }
 
   /* Allocate */
@@ -1252,7 +1255,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   if (!s) {
     fprintf(stderr, "Error: Failed to start gammu subsystem\n");
-    rv = 1; goto cleanup;
+    rv = 3; goto cleanup;
   }
 
   /* Find SMSC number */
@@ -1260,7 +1263,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   if ((s->err = GSM_GetSMSC(s->sm, smsc)) != ERR_NONE) {
     fprintf(stderr, "Error: Failed to discover SMSC number\n");
-    rv = 2; goto cleanup_sms;
+    rv = 4; goto cleanup_sms;
   }
 
   transmit_status_t status;
@@ -1442,15 +1445,18 @@ int main(int argc, char *argv[]) {
   int n = parse_global_arguments(argc, argp, &app);
 
   if (app.invalid) {
-    return usage();
+    usage();
+    fprintf(stderr, "Error: one or more invalid argument(s) provided\n");
+    goto cleanup;
   }
 
   argc -= n;
   argp += n;
 
   if (argc < 1) {
+    usage();
     fprintf(stderr, "Error: no command specified\n");
-    return usage();
+    goto cleanup;
   }
 
   /* Option #1:
@@ -1480,8 +1486,8 @@ int main(int argc, char *argv[]) {
   /* No other valid options:
    *  Display message and usage information. */
 
-  fprintf(stderr, "Error: invalid action specified\n");
   rv = usage();
+  fprintf(stderr, "Error: invalid action specified\n");
 
   cleanup:
     if (s) {
