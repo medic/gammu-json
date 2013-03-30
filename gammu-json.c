@@ -11,11 +11,53 @@
 #define TIMESTAMP_MAX_WIDTH (64)
 #define BITFIELD_CELL_WIDTH (CHAR_BIT)
 
+const static char *usage_text = (
+  "\n"
+  "Usage:\n"
+  "  %s [global-options] [command] [args]...\n"
+  "\n"
+  "Global options:\n"
+  "\n"
+  "  -h, --help                 Print this useful message\n"
+  "\n"
+  "  -c, --config <file>        Specify path to Gammu configuration file\n"
+  "                             (default: /etc/gammurc)\n"
+  "Commands:\n"
+  "\n"
+  "  retrieve                   Retrieve all messages from a device, as a\n"
+  "                             JSON-encoded array of objects, on stdout.\n"
+  "\n"
+  "  delete { all | N... }      Delete one or more messages from a device,\n"
+  "                             using location numbers to identify them.\n"
+  "                             Specify 'all' to delete any messages found.\n"
+  "                             Prints JSON-encoded information about any\n"
+  "                             deleted/skipped/missing messages on stdout.\n"
+  "\n"
+  "  send { phone text }...     Send one or more messages. Each message is\n"
+  "                             sent to exactly one phone number. Prints\n"
+  "                             JSON-encoded information about the sent\n"
+  "                             messages on stdout.\n"
+  "About:\n"
+  "\n"
+  "  Copyright (c) 2013 David Brown <hello at scri.pt>.\n"
+  "  Copyright (c) 2013 Medic Mobile, Inc. <david at medicmobile.org>\n"
+  "\n"
+  "  Released under the GNU General Public License, version three.\n"
+  "  For more information, see <http://github.com/browndav/gammu-json>.\n"
+  "\n"
+);
+
+/**
+ * @name boolean_t
+ */
+typedef uint8_t boolean_t;
+
 /**
  * @name gammu_state_t
  */
 typedef struct app_options {
 
+  boolean_t invalid;
   char *application_name;
   char *gammu_configuration_path;
 
@@ -55,11 +97,6 @@ typedef GSM_DateTime message_timestamp_t;
  * @name smsc_t
  */
 typedef GSM_SMSC smsc_t;
-
-/**
- * @name boolean_t
- */
-typedef uint8_t boolean_t;
 
 /**
  * @name message_iterate_fn_t
@@ -202,6 +239,7 @@ delete_status_t *initialize_delete_status(delete_status_t *d) {
  */
 app_options_t *initialize_application_options(app_options_t *o) {
 
+  o->invalid = FALSE;
   o->application_name = NULL;
   o->gammu_configuration_path = NULL;
 
@@ -235,38 +273,7 @@ static void *malloc_and_zero(int size) {
  */
 static int usage() {
 
-  const char *usage = 
-  "\n"
-  "Usage:\n"
-  "  %s [global-options] [command] [args]...\n"
-  "\n"
-  "Global options:\n"
-  "\n"
-  "  -c, --config <file>        Specify path to Gammu configuration file\n"
-  "                             (default: /etc/gammurc)\n"
-  "Commands:\n"
-  "\n"
-  "  retrieve                   Retrieve all messages from a device, as a\n"
-  "                             JSON-encoded array of objects, on stdout.\n"
-  "\n"
-  "  delete { all | N... }      Delete one or more messages from a device.\n"
-  "                             Print JSON-encoded information about any\n"
-  "                             deleted/skipped/missing messages on stdout.\n"
-  "\n"
-  "  send { phone text }...     Send one or more messages. Each message is\n"
-  "                             sent to exactly one phone number. Print\n"
-  "                             JSON-encoded information about the sent\n"
-  "                             messages on stdout.\n"
-  "About:\n"
-  "\n"
-  "  Copyright (c) 2013 David Brown <hello at scri.pt>.\n"
-  "  Copyright (c) 2013 Medic Mobile, Inc. <david at medicmobile.org>\n"
-  "\n"
-  "  Released under the GNU General Public License, version three.\n"
-  "  For more information, see <http://github.com/browndav/gammu-json>.\n"
-  "\n";
-
-  fprintf(stderr, usage, app.application_name);
+  fprintf(stderr, usage_text, app.application_name);
   return 127;
 }
 
@@ -1064,6 +1071,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   bitfield_t *bf = NULL;
 
   if (argc < 2) {
+    fprintf(stderr, "Error: no valid location(s) specified\n");
     return usage();
   }
 
@@ -1075,8 +1083,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
     if (!n) {
       fprintf(stderr, "Error: no valid location(s) specified\n");
-      rv = usage();
-      goto cleanup;
+      rv = 2; goto cleanup;
     }
 
     if (n == ULONG_MAX && errno == ERANGE) {
@@ -1221,6 +1228,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   char **argp = &argv[1];
 
   if (argc <= 2) {
+    fprintf(stderr, "Error: Not enough arguments provided\n");
     return usage();
   }
 
@@ -1392,11 +1400,17 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
 
   while (*argp != NULL) {
 
+    if (strcmp(*argp, "-h") == 0 || strcmp(*argp, "--help") == 0) {
+      o->invalid = TRUE;
+      break;
+    }
+
     if (strcmp(*argp, "-c") == 0 || strcmp(*argp, "--config") == 0) {
 
       if (*++argp == NULL) {
 	fprintf(stderr, "Error: no configuration file name provided\n");
-	return usage();
+	o->invalid = TRUE;
+	break;
       }
 
       o->gammu_configuration_path = *argp++;
@@ -1426,9 +1440,16 @@ int main(int argc, char *argv[]) {
   app.application_name = *argp++;
 
   int n = parse_global_arguments(argc, argp, &app);
-  argc -= n; argp += n;
+
+  if (app.invalid) {
+    return usage();
+  }
+
+  argc -= n;
+  argp += n;
 
   if (argc < 1) {
+    fprintf(stderr, "Error: no command specified\n");
     return usage();
   }
 
