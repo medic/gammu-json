@@ -105,6 +105,10 @@ Usage: ./gammu-json { retrieve | send { phone text }... | delete N... }
 
 ### Retrieval (empty)
 
+Retrieving messages from a new/blank SMS modem yields the empty JSON set, and
+exits with zero status. The program will display an error message on `stderr`
+and exit with a non-zero status if something goes wrong.
+
 ```shell
 $ gammu-json retrieve
 ```
@@ -115,7 +119,8 @@ $ gammu-json retrieve
 ### Sending (simple)
 
 ```shell
-$ ./gammu-json send '+15038030547' 'This is a simple test message.'
+$ ./gammu-json send '+1-503-555-1212' 'This is a simple test message.'
+```
 ```json
 [{"index": 1, "result": "success", "parts_sent": 1, "parts_total": 1, "parts": [{"result": "success", "content": "This is a simple test message.", "index": 1, "status": 0, "reference": 250}]}]
 ```
