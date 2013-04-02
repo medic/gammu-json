@@ -122,7 +122,11 @@ $ gammu-json retrieve
 $ ./gammu-json send '+1-503-555-1212' 'This is a simple test message.'
 ```
 ```json
-[{"index": 1, "result": "success", "parts_sent": 1, "parts_total": 1, "parts": [{"result": "success", "content": "This is a simple test message.", "index": 1, "status": 0, "reference": 250}]}]
+[
+ {"index": 1, "result": "success", "parts_sent": 1, "parts_total": 1, "parts": [
+    {"result": "success", "content": "This is a simple test message.", "index": 1, "status": 0, "reference": 250}
+  ]}
+]
 ```
 
 Authors
