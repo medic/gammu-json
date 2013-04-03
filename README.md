@@ -1,5 +1,5 @@
-`gammu-json`
-============
+The `gammu-json` utility
+========================
 
 A command-line interface to the important portions of `libgammu` that speaks
 JSON and UTF-8. Usable now; still under active development.
