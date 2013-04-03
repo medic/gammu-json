@@ -5,7 +5,7 @@ A command-line interface to the important portions of `libgammu` that speaks
 JSON and UTF-8. Usable now; still under active development.
 
 If you want to skip all of this summary-level stuff and go straight to
-[the usage examples](#Examples), we won't be offended.
+[the usage examples](#examples), we won't be offended.
 
 Summary
 -------
@@ -50,7 +50,9 @@ Building `gammu-json` from source can typically be accomplished by running
 `libgammu`. If you'd like to link with a `libgammu` that isn't under `/usr`,
 try defining the `PREFIX` variable when you run `make`, like this:
 
-``make PREFIX=/srv/software/libgammu``
+```
+make PREFIX=/srv/software/libgammu
+```
 
 or, alternatively, set the `PKG_CONFIG_PATH` environment variable to point
 directly to your preferred `$prefix/lib/pkgconfig` directory.
@@ -504,7 +506,7 @@ property, and the `result` of the deletion is reported as `partial`.
 Authors
 -------
 
-Copyright (c) 2013 David Brown <hello@scri.pt>
+Copyright (c) 2013 David Brown ``<hello at scri.pt>``
 
-Copyright (c) 2013 Medic Mobile, Inc. <david@medicmobile.org>
+Copyright (c) 2013 Medic Mobile, Inc. ``<david at medicmobile.org>``
 
