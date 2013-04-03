@@ -117,7 +117,7 @@ Usage:
 Sending a single message is easy.
 
 ```shell
-$ ./gammu-json send '+15035551212' 'This is a simple test message.'
+$ gammu-json send '+15035551212' 'This is a simple test message.'
 ```
 ```json
 [
@@ -144,7 +144,7 @@ $ ./gammu-json send '+15035551212' 'This is a simple test message.'
 Sending more than one message is also easy.
 
 ```shell
-$ ./gammu-json send \
+$ gammu-json send \
   '+15035551212' 'This is a simple test message.' \
   '+15035551212' 'This is another simple test message.'
 ```
@@ -225,7 +225,7 @@ default GSM alphabet, the message will automatically be sent as a two byte per
 character UCS-2 SMS.
 
 ```shell
-$ ./gammu-json send '+15035551212' 'This is a test message. الحروف عربية. ان شاء الله.'
+$ gammu-json send '+15035551212' 'This is a test message. الحروف عربية. ان شاء الله.'
 ```
 ```json
 [
@@ -256,7 +256,7 @@ non-Latin characters.
 
 
 ```shell
-$ ./gammu-json send '+15035551212' 'The portion before this contains only Latin characters. Nepali text follows this. हो'
+$ gammu-json send '+15035551212' 'The portion before this contains only Latin characters. Nepali text follows this. हो'
 ```
 ```json
 [
