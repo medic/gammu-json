@@ -1,8 +1,11 @@
 The `gammu-json` utility
 ========================
 
-A command-line interface to the important portions of `libgammu` that speaks
-JSON and UTF-8. Usable now; still under active development.
+A command-line interface to the important portions of
+[`libgammu`](https://github.com/gammu/gammu)
+that speaks JSON and UTF-8. This package is usable now, but still
+under active development. For more information on `libgammu`, please
+review [Gammu's documentation](http://wammu.eu/gammu/) directly.
 
 If you want to skip all of this summary-level stuff and go straight to
 [the usage examples](#examples), we won't be offended.
@@ -77,7 +80,8 @@ though, creating this file is the simplest way to get started.
 Licensing
 ---------
 
-This software is released under the GNU General Public License (GPL) v3.
+This software is released under the
+[GNU General Public License (GPL) v3](http://www.gnu.org/licenses/gpl-3.0.txt).
 
 Executing and/or parsing the output of an unmodified `gammu-json` from your
 closed-source program *does not* create a derivative work of `gammu-json`, nor
