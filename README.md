@@ -7,8 +7,8 @@ that speaks JSON and UTF-8. This package is usable now, but still
 under active development. For more information on `libgammu`, please
 review [Gammu's documentation](http://wammu.eu/gammu/) directly.
 
-If you want to skip all of this summary-level stuff and go straight to
-[the usage examples](#examples), we won't be offended.
+_If you want to skip all of this summary-level stuff and go straight to
+[the usage examples](#examples), we won't be offended._
 
 Summary
 -------
