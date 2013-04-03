@@ -2,7 +2,7 @@ The `gammu-json` utility
 ========================
 
 A command-line interface to the important portions of
-[`libgammu`](https://github.com/gammu/gammu) that speaks
+[`libgammu`](https://github.com/gammu/gammu). Speaks
 JSON and UTF-8 by default. Minimal dependence on external libraries.
 
 This package is usable now, but still under active development.
