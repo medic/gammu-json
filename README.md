@@ -2,10 +2,13 @@ The `gammu-json` utility
 ========================
 
 A command-line interface to the important portions of
-[`libgammu`](https://github.com/gammu/gammu)
-that speaks JSON and UTF-8. This package is usable now, but still
-under active development. For more information, please review
-the [documentation for Gammu](http://wammu.eu/gammu/) directly.
+[`libgammu`](https://github.com/gammu/gammu) that speaks
+JSON and UTF-8 by default. Minimal dependence on external libraries.
+
+This package is usable now, but still under active development.
+Please refrain from using it in production applications until we're
+sure that we've shaken all the bugs out. For more information, please
+review the [documentation for Gammu](http://wammu.eu/gammu/) directly.
 
 If you want to **skip all of this summary-level stuff and go straight to
 [the examples](#examples)**, we won't be offended.
@@ -515,3 +518,24 @@ Copyright (c) 2013 David Brown ``<hello at scri.pt>``
 Copyright (c) 2013 Medic Mobile, Inc. ``<david at medicmobile.org>``
 
 All rights reserved. Meticulously handcrafted with love in Portland, Oregon, USA.
+
+Legal
+-----
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL DAVID BROWN BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+
+
