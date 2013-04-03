@@ -507,7 +507,7 @@ Authors
 -------
 
 Copyright (c) 2013 David Brown ``<hello at scri.pt>``
-
+<br />
 Copyright (c) 2013 Medic Mobile, Inc. ``<david at medicmobile.org>``
 
 All rights reserved. Meticulously handcrafted with love in Portland, Oregon, USA.
