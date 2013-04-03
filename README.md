@@ -313,6 +313,9 @@ service center" (SMSC) are each included, along with a receive timestamp, an
 SMSC receive timestamp (if available), location number (on the SMS modem), user
 data header (UDH) value, and segment information (in this case, one of one).
 
+```shell
+$ gammu-json retrieve
+```
 ```json
 [
  {
@@ -354,6 +357,9 @@ the sender's phone number in `from`, and the user data header value in
 messages that are _missing_ the proper header information will have a
 `udh` value of `null`.
 
+```shell
+$ gammu-json retrieve
+```
 ```json
 [
  {
