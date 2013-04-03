@@ -2,8 +2,9 @@ The `gammu-json` utility
 ========================
 
 A command-line interface to the important portions of
-[`libgammu`](https://github.com/gammu/gammu). Speaks
-JSON and UTF-8 by default. Minimal dependence on external libraries.
+[`libgammu`](https://github.com/gammu/gammu). Send and receive text
+messages programmatically using a USB GSM or CDMA modem. Speaks JSON
+and UTF-8 by default. Minimal dependence on external libraries.
 
 This package is usable now, but still under active development.
 Please refrain from using it in production applications until we're
