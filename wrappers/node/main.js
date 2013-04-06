@@ -60,11 +60,23 @@ exports.prototype = {
       async.waterfall([
 
         function (_next_fn) {
-          self._send_messages(_next_fn);
+          self._send_messages(function (_err) {
+            _next_fn();
+          });
         },
 
         function (_next_fn) {
-          self._receive_messages(_next_fn);
+          console.log('--- receive ---');
+          self._receive_messages(function (_err) {
+            console.log('--- end receive ---');
+            _next_fn();
+          });
+        },
+
+        function (_next_fn) {
+          self._delete_messages(function (_err) {
+            _next_fn();
+          });
         }
 
       ], function (_err) {
@@ -106,10 +118,6 @@ exports.prototype = {
       var args = [ 'send' ].concat(
         self._create_message_transmission_args(self._outbound_queue)
       );
-
-      if (args.length <= 0) {
-        return _callback();
-      }
 
       self._subprocess('gammu-json', args, function (_err, _rv) {
 
@@ -153,7 +161,7 @@ exports.prototype = {
               unsend the already-transmitted message. Thus, there's no
               possible error to check here, and we just continue on. */
 
-          self._notify_transmit(message, _result, function (_error) {
+          self._notify_transmit(message, _result, function () {
             return _next_fn();
           });
         },
@@ -182,16 +190,31 @@ exports.prototype = {
           return _callback(_err);
         }
 
-        for (var i = 0, len = _rv.length; i < len; ++i) {
+        async.each(_rv,
 
-          if (_rv[i].total_parts <= 1) {
-            self._inbound_queue.push(_rv[i]);
-          } else {
-            self._reassemble_message(_rv[i]);
+          function (_r, _next_fn) {
+      
+            if (_r.total_segments <= 1) {
+              self._inbound_queue.push(_r);
+              return _next_fn();
+            }
+
+            /* Reassembly:
+                This will asynchronously trigger the caller's `return-parts`
+                handler, and then attempt to completely reassemble the
+                message with what it gets back. If it's able to, it will
+                add the (now complete) message to the inbound queue. If
+                not, it'll provide this message part to our caller (for
+                temporary storage) via the `receive-part` event. When the
+                next part comes in, we'll land back here and repeat this. */
+
+            self._reassemble_message(_r, _next_fn);
+          },
+
+          function () {
+            self._deliver_incoming_messages(_callback);
           }
-        }
-
-        self._deliver_incoming_messages(_callback);
+        );
       });
     },
 
@@ -201,7 +224,6 @@ exports.prototype = {
     _deliver_incoming_messages: function (_callback) {
 
       var self = this;
-      var undelivered_messages = [];
 
       async.each(self._inbound_queue,
 
@@ -209,27 +231,50 @@ exports.prototype = {
           self._notify_receive(_message, function (_error) {
 
             /* Error status:
-                If there was an error in delivery, we hang on to
-                the message and retry delivery at a later time. */
+                If there was an error in delivery, then the message
+                is still on the device. Just forget about it for the
+                time being; we'll end up right back here during the
+                next delivery, and will see the same message again. */
 
             if (_error) {
-              undelivered_messages.push(_message);
+              return _next_fn();
             }
 
-            /* All finished */
+            /* Success:
+                The message now belongs to someone else, who has
+                confirmed it has been written to the appropriate storage.
+                Add it to the delete queue to be cleared from the modem. */
+
+            self._deletion_queue.push(_message);
             _next_fn();
+
           });
         },
         function (_err) {
 
           /* Finish up:
-              Replace the inbound queue with the messages we didn't
-              get an okay on; the next queue run will retry them. */
+              Replace the inbound queue with the empty array;
+              all messages are either scheduled for deletion or
+              will remain on the device until the next delivery. */
 
-          self._inbound_queue = undelivered_messages;
-          return _callback.call(self);
+          self._inbound_queue = [];
+          return _callback();
         }
       );
+    },
+
+    /** @name _delete_messages:
+     */
+    _delete_messages: function (_callback) {
+
+      if (this._deletion_queue.length <= 0) {
+        return _callback();
+      }
+
+      console.log('delete', this._deletion_queue);
+      this._deletion_queue = [];
+
+      return _callback();
     },
 
     /**
@@ -264,9 +309,20 @@ exports.prototype = {
     },
 
     /**
-     * @name _reassemble_messages:
+     * @name _notify_delete:
+     *   Invoke events appropriately when a message is deleted from the
+     *   device. This may be helpful to callers who want to detect and
+     *   avoid duplicate messages in a deletion failure situation.
      */
-    _reassemble_messages: function (_callback) {
+    _notify_delete: function (_message, _callback) {
+
+      console.log('delete', _message);
+      return _callback();
+    },
+    /**
+     * @name _reassemble_message:
+     */
+    _reassemble_message: function (_message, _callback) {
 
       var self = this;
 
@@ -285,7 +341,7 @@ exports.prototype = {
 
       self._inbound_queue = [];
       self._outbound_queue = [];
-      self._partial_messages = {};
+      self._deletion_queue = [];
 
       self._is_polling = false;
       self._is_processing = false;
@@ -301,8 +357,8 @@ exports.prototype = {
       if (self._options.prefix) {
         self._setenv('PATH', function (_value) {
           return (
-            (_value || '') + ':' +
-              path.resolve(self._options.prefix, 'bin')
+            path.resolve(self._options.prefix, 'bin') +
+              ':' + (_value || '')
           );
         });
       }
@@ -378,15 +434,16 @@ exports.prototype = {
      *   has been successfully handed off to the telco for further
      *   transmission); `receive-part` (for being notified of the receipt of
      *   each individual part of a multipart/concatenated message); and
-     *   `retrieve-part` (invoked during message reassembly if a
-     *   previously-received message part is needed to aid the reassembly
+     *   `return-parts` (invoked during message reassembly if a set of
+     *   previously-received message parts is needed to drive the reassembly
      *   process).
      *
      *   To obtain full support for multipart message reassembly, you *must*
-     *   handle both the `receive-part` and `retrieve-part` events.  The
+     *   handle both the `receive-part` and `return-parts` events.  The
      *   `receive-part` callback must write the message part to persistent
-     *   storage before returning; the `retrieve-part` callback must fetch
-     *   and return a previously-stored message part.
+     *   storage before returning; the `return-parts` callback must fetch
+     *   and return all previously-stored message parts for a given message
+     *   identifier.
      */
     on: function (_event, _callback) {
 
@@ -394,7 +451,7 @@ exports.prototype = {
         case 'receive':
         case 'transmit':
         case 'receive-part':
-        case 'retrieve-part':
+        case 'return-parts':
           this._handlers[_event] = _callback;
           break;
         default:
@@ -482,7 +539,7 @@ m.on('transmit', function (_sms, _result, _callback) {
 m.on('receive-part', function (_part, _callback) {
 });
 
-m.on('retrieve-part', function (_id, _callback) {
+m.on('return-parts', function (_id, _callback) {
 });
 
 m.start();
