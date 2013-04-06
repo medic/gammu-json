@@ -60,15 +60,13 @@ exports.prototype = {
       async.waterfall([
 
         function (_next_fn) {
-          self._send_messages(function (_err) {
+          self._transmit_messages(function (_err) {
             _next_fn();
           });
         },
 
         function (_next_fn) {
-          console.log('--- receive ---');
           self._receive_messages(function (_err) {
-            console.log('--- end receive ---');
             _next_fn();
           });
         },
@@ -101,13 +99,26 @@ exports.prototype = {
      */
     _create_message_transmission_args: function (_messages) {
 
-      return [];
+      var i, rv = [];
+      var splice = false;
+
+      for (i = 0, len = _messages.length; i < len; ++i) {
+
+        if (this._transmit_batch_size <= i + 1) {
+          break;
+        }
+        
+        rv.push(_messages[i].to);
+        rv.push(_messages[i].text);
+      }
+
+      return rv;
     },
 
     /**
-     * @name _send_messages:
+     * @name _transmit_messages:
      */
-    _send_messages: function (_callback) {
+    _transmit_messages: function (_callback) {
 
       var self = this;
 
@@ -132,12 +143,12 @@ exports.prototype = {
     /**
      * @name _deliver_transmit_results:
      */
-    _deliver_transmit_results: function (_callback) {
+    _deliver_transmit_results: function (_results, _callback) {
 
       var self = this;
       var unsent_messages = [];
 
-      async.each(_rv,
+      async.each(_results,
 
         function (_r, _next_fn) {
 
@@ -148,7 +159,7 @@ exports.prototype = {
               transmission result object will always imply the (zero-based)
               index of its corresponding message object in the outgoing queue. */
               
-          var queue_index = _result.index - 1;
+          var queue_index = _r.index - 1;
           var message = self._outbound_queue[queue_index];
 
           if (_r.result != 'success') {
@@ -161,7 +172,7 @@ exports.prototype = {
               unsend the already-transmitted message. Thus, there's no
               possible error to check here, and we just continue on. */
 
-          self._notify_transmit(message, _result, function () {
+          self._notify_transmit(message, _r, function () {
             return _next_fn();
           });
         },
@@ -200,12 +211,12 @@ exports.prototype = {
             }
 
             /* Reassembly:
-                This will asynchronously trigger the caller's `return-parts`
+                This will asynchronously trigger the caller's `return_parts`
                 handler, and then attempt to completely reassemble the
                 message with what it gets back. If it's able to, it will
                 add the (now complete) message to the inbound queue. If
                 not, it'll provide this message part to our caller (for
-                temporary storage) via the `receive-part` event. When the
+                temporary storage) via the `receive_part` event. When the
                 next part comes in, we'll land back here and repeat this. */
 
             self._reassemble_message(_r, _next_fn);
@@ -286,8 +297,12 @@ exports.prototype = {
      */
     _notify_transmit: function (_message, _result, _callback) {
 
-      console.log('transmit', _message, _result);
-      return _callback();
+      var fn = this._handlers.transmit;
+
+      return (
+        fn ? fn.call(this, _message, _result, _callback) :
+          _callback(new Error("No event listener present for 'transmit'"))
+      );
     },
 
     /**
@@ -304,21 +319,31 @@ exports.prototype = {
      */
     _notify_receive: function (_message, _callback) {
 
-      console.log('receive', _message);
-      return _callback();
+      var fn = this._handlers.receive;
+
+      return (
+        fn ? fn.call(this, _message, _callback) :
+          _callback(new Error("No event listener present for 'receive'"))
+      );
     },
 
     /**
      * @name _notify_delete:
      *   Invoke events appropriately when a message is deleted from the
      *   device. This may be helpful to callers who want to detect and
-     *   avoid duplicate messages in a deletion failure situation.
+     *   avoid duplicate messages in a deletion failure situation. This
+     *   function is synchronous; it does not wait for the caller to
+     *   perform any required asynchronous work -- we're all done.
      */
-    _notify_delete: function (_message, _callback) {
+    _notify_delete: function (_message) {
 
-      console.log('delete', _message);
-      return _callback();
+      var fn = this._handlers.delete;
+
+      if (fn) {
+        fn.call(this, _message);
+      }
     },
+
     /**
      * @name _reassemble_message:
      */
@@ -349,6 +374,15 @@ exports.prototype = {
       self._poll_interval = (
         _.isNumber(options.interval) ?
           (options.interval * 1000) : 10000 /* Seconds to milliseconds */
+      );
+
+      /* Transmit batch size:
+          This is the highest number of outbound messages that will be
+          provided to a single run of gammu-json. This is intended to
+          avoid high receive latency and OS-level `argv` size limits. */
+
+      self._transmit_batch_size = (
+        options.transmit_batch_size || 64
       );
 
       /* Caller-provided prefix:
@@ -393,7 +427,7 @@ exports.prototype = {
       /* Fix up arguments:
           This allows `_context` to be optionally omitted. */
 
-      if (!_after_transmit_callback) {
+      if (!_transmit_callback) {
         _transmit_callback = _context;
         _context = false;
       }
@@ -414,13 +448,11 @@ exports.prototype = {
       }
 
       /* Push on to work queue:
-          This queue is consumed by `_send_messages`. */
+          This queue is consumed by `_transmit_messages`. */
 
       this._outbound_queue.push({
-        to: _to,
-        message: _message,
-        context: _context,
-        callback: _transmit_callback
+        to: _to, text: _message,
+        context: _context, callback: _transmit_callback
       });
 
       return this;
@@ -432,26 +464,27 @@ exports.prototype = {
      *   `receive` (for being notified of single-part and fully-reassembled
      *   messages); `transmit` (for being notified of when a sent message
      *   has been successfully handed off to the telco for further
-     *   transmission); `receive-part` (for being notified of the receipt of
+     *   transmission); `receive_part` (for being notified of the receipt of
      *   each individual part of a multipart/concatenated message); and
-     *   `return-parts` (invoked during message reassembly if a set of
+     *   `return_parts` (invoked during message reassembly if a set of
      *   previously-received message parts is needed to drive the reassembly
      *   process).
      *
      *   To obtain full support for multipart message reassembly, you *must*
-     *   handle both the `receive-part` and `return-parts` events.  The
-     *   `receive-part` callback must write the message part to persistent
-     *   storage before returning; the `return-parts` callback must fetch
+     *   handle both the `receive_part` and `return_parts` events.  The
+     *   `receive_part` callback must write the message part to persistent
+     *   storage before returning; the `return_parts` callback must fetch
      *   and return all previously-stored message parts for a given message
      *   identifier.
      */
     on: function (_event, _callback) {
 
       switch (_event) {
+        case 'delete':
         case 'receive':
         case 'transmit':
-        case 'receive-part':
-        case 'return-parts':
+        case 'receive_part':
+        case 'return_parts':
           this._handlers[_event] = _callback;
           break;
         default:
@@ -530,17 +563,33 @@ var m = exports.create({
   prefix: '/srv/software/medic-core/v1.2.1/x86'
 });
 
-m.on('receive', function (_sms, _callback) {
+m.on('receive', function (_message, _callback) {
+  console.log('receive', _message);
+  return _callback();
 });
 
-m.on('transmit', function (_sms, _result, _callback) {
+m.on('transmit', function (_message, _result, _callback) {
+  console.log('transmit', _message, _result);
+  return _callback();
 });
 
-m.on('receive-part', function (_part, _callback) {
+m.on('receive_part', function (_part, _callback) {
+  console.log('receive_part', _part);
+  return _callback();
 });
 
-m.on('return-parts', function (_id, _callback) {
+m.on('return_parts', function (_id, _callback) {
+  console.log('return_parts', _id);
+  return _callback(null, []);
+});
+
+m.on('delete', function (_message) {
+  console.log('delete', _message);
 });
 
 m.start();
+
+m.send('+15158226442', 'This is a test message', function() {
+  console.log('single transmit callback');
+});
 
