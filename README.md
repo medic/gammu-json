@@ -68,8 +68,8 @@ Setup
 -----
 
 Currently, `gammu-json` requires that (a) you have a valid `/etc/gammurc` file
-(or symbolic link), and that (b) that file provides a working phone/modem
-configuration in the `gammu` section. Here's a simple example:
+(or symbolic link), and (b) that configuration file provides a working
+phone/modem configuration in its `gammu` section. Here's a simple example:
 
 ```
 [gammu]
