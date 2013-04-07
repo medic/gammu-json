@@ -99,10 +99,9 @@ exports.prototype = {
      */
     _create_message_transmission_args: function (_messages) {
 
-      var i, rv = [];
-      var splice = false;
+      var rv = [];
 
-      for (i = 0, len = _messages.length; i < len; ++i) {
+      for (var i = 0, len = _messages.length; i < len; ++i) {
 
         if (this._transmit_batch_size <= i + 1) {
           break;
@@ -161,6 +160,11 @@ exports.prototype = {
               
           var queue_index = _r.index - 1;
           var message = self._outbound_queue[queue_index];
+
+          /* Check for success:
+              Currently, we retry the whole message if any part fails.
+              This isn't ideal; we should only retry untransmitted parts.
+              For the ideal method, `gammu-json` needs to be modified. */
 
           if (_r.result != 'success') {
             unsent_messages.push(_message);
@@ -274,16 +278,67 @@ exports.prototype = {
       );
     },
 
-    /** @name _delete_messages:
+    /**
+     * @name _create_message_deletion_args:
+     *   Return an array of location numbers from the deletion queue,
+     *   suitable for use with the `gammu-json` `delete` command.
+     *   These are command-line arguments for now, but might be sent
+     *    via `stdin` instead once `gammu-json` actually supports it.
+     */
+    _create_message_deletion_args: function (_messages) {
+
+      var rv = [];
+
+      for (var i = 0, len = _messages.length; i < len; ++i) {
+
+        if (this._delete_batch_size <= i + 1) {
+          break;
+        }
+        
+        rv.push(_messages[i].location);
+      }
+
+      return rv;
+    },
+
+    /**
+     * @name _delete_messages:
      */
     _delete_messages: function (_callback) {
 
-      if (this._deletion_queue.length <= 0) {
+      var self = this;
+
+      var undeleted_messages = [];
+      var deletion_queue = self._deletion_queue;
+
+      if (deletion_queue.length <= 0) {
         return _callback();
       }
 
-      console.log('delete', this._deletion_queue);
-      this._deletion_queue = [];
+      var args = [ 'delete' ].concat(
+        self._create_message_deletion_args(deletion_queue)
+      );
+
+      self._subprocess('gammu-json', args, function (_err, _rv) {
+
+        if (_err) {
+          return _callback(_err);
+        }
+
+        for (var i = 0, len = deletion_queue.length; i < len; ++i) {
+
+          var message = deletion_queue[i];
+
+          if (_rv.detail[message.location] == 'ok') {
+            self._notify_delete(message);
+          } else {
+            undeleted_messages.push(message);
+          }
+        }
+
+        self._deletion_queue = undeleted_messages;
+      });
+
 
       return _callback();
     },
@@ -383,6 +438,13 @@ exports.prototype = {
 
       self._transmit_batch_size = (
         options.transmit_batch_size || 64
+      );
+
+      /* Delete batch size:
+          This has the same rationale as above, but for deletions. */
+
+      self._delete_batch_size = (
+        options.delete_batch_size || 1024
       );
 
       /* Caller-provided prefix:
@@ -506,7 +568,7 @@ exports.prototype = {
       var subprocess = child.spawn(_path, _argv, { stdio: 'pipe' });
  
       /* Fix up arguments:
-       *   This allows `_options` to be optionally omitted. */
+          This allows `_options` to be optionally omitted. */
 
       if (!_callback) {
         _callback = _options;
