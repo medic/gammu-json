@@ -162,9 +162,9 @@ exports.prototype = {
           var message = self._outbound_queue[queue_index];
 
           /* Check for success:
-              Currently, we retry the whole message if any part fails.
-              This isn't ideal; we should only retry untransmitted parts.
-              For the ideal method, `gammu-json` needs to be modified. */
+              Currently, we retry the whole message if any one segment
+              fails. This isn't ideal; we should only retry untransmitted
+              parts. To do this, `gammu-json` would need to be modified. */
 
           if (_r.result != 'success') {
             unsent_messages.push(_message);
@@ -193,7 +193,20 @@ exports.prototype = {
       );
     },
 
-    /** @name _receive_messages:
+    /**
+     * @name _transform_received_message:
+     */
+    _transform_received_message: function (_m) {
+
+      if (_m.total_segments > 1) {
+        _m.id = [ _m.from, (_m.udh || 0), _m.total_segments ].join('-');
+      }
+
+      return this;
+    },
+
+    /**
+     * @name _receive_messages:
      */
     _receive_messages: function (_callback) {
 
@@ -207,26 +220,35 @@ exports.prototype = {
 
         async.each(_rv,
 
-          function (_r, _next_fn) {
-      
-            if (_r.total_segments <= 1) {
-              self._inbound_queue.push(_r);
+          function (_message, _next_fn) {
+
+            try {
+              self._transform_received_message(_message);
+            } catch (e) {
+              return _next_fn(e);
+            }
+
+            if (_message.total_segments <= 1) {
+              self._inbound_queue.push(_message);
               return _next_fn();
             }
 
-            /* Reassembly:
-                This will asynchronously trigger the caller's `return_parts`
-                handler, and then attempt to completely reassemble the
-                message with what it gets back. If it's able to, it will
-                add the (now complete) message to the inbound queue. If
-                not, it'll provide this message part to our caller (for
-                temporary storage) via the `receive_part` event. When the
-                next part comes in, we'll land back here and repeat this. */
+            self._notify_receive_segment(_message, function (_e) {
 
-            self._reassemble_message(_r, _next_fn);
+              if (_e) {
+                return _next_fn(_e);
+              }
+
+              self._try_to_reassemble_message(_message, _next_fn);
+            });
           },
 
-          function () {
+          function (_err) {
+
+            if (_err) {
+              return _callback(_err);
+            }
+
             self._deliver_incoming_messages(_callback);
           }
         );
@@ -354,9 +376,13 @@ exports.prototype = {
 
       var fn = this._handlers.transmit;
 
+      if (_.isFunction(_message.callback)) {
+        _message.callback.call(this, _message, _result);
+      }
+
       return (
         fn ? fn.call(this, _message, _result, _callback) :
-          _callback(new Error("No event listener present for 'transmit'"))
+          _callback(new Error("No listener present for 'transmit'"))
       );
     },
 
@@ -378,7 +404,55 @@ exports.prototype = {
 
       return (
         fn ? fn.call(this, _message, _callback) :
-          _callback(new Error("No event listener present for 'receive'"))
+          _callback(new Error("No listener present for 'receive'"))
+      );
+    },
+
+    /**
+     * @name _notify_receive_segment:
+     *   Invoke events appropriately for a single segment of a multi-part
+     *   message. As in `_notify_receive`, the handler of this event must
+     *   call `_callback` once it has stored the message segment on some
+     *   form of reliable persistent storage. The callback takes no
+     *   arguments, aside from the usual node-style error argument.
+     */
+    _notify_receive_segment: function (_message, _callback) {
+
+      var fn = this._handlers.receive_segment;
+
+      return (
+        fn ? fn.call(this, _message, _callback) :
+          _callback(new Error("No listener present for 'receive_segment'"))
+      );
+    },
+
+    /**
+     * @name _request_return_segments:
+     *   Request an array of matching segments from our instansiator. A
+     *   "matching segment" is a message that has a `total_segments`
+     *   greater than one, and has an `id` property that matches the `_id`
+     *   argument supplied to us. These segments will have been previously
+     *   sent to our instansiator via the `reveive_segment` event. The
+     *   `return_segments` facility is used only when reassembling multi-part
+     *   messages, and allows for different storage methods to be "plugged
+     *   in" at any time.  This approach will frequently avoid the need
+     *   for an application to maintain multiple data stores.
+     *
+     *   The `_callback` function must be invoked by our instanansiator
+     *   once the appropriate message segments have been brought back in
+     *   to main memory.  The callback's first argument must be a
+     *   node-style error argument (or null if no error occurred); the
+     *   second argument must be an array of message objects with matching
+     *   `id`s. The second argument is ignored if the first argument
+     *   indicates an error.
+     */
+    _request_return_segments: function (_id, _callback) {
+
+      var fn = this._handlers.return_segments;
+
+      return (
+        fn ? fn.call(this, _id, _callback) :
+          _callback(new Error("No listener present for 'return_segments'"))
       );
     },
 
@@ -401,12 +475,37 @@ exports.prototype = {
 
     /**
      * @name _reassemble_message:
+     *  Asynchronously trigger our instansiator's `return_segments`
+     *  handler, then attempt to completely reassemble `_message` using
+     *  what that event handler returned to us. If we're able to, add
+     *  the (now fully-reassembled) message to the inbound queue.
+     *  Before invoking this function, you must have already provided
+     *  `_message` to our instansiator via the `receive_segment` event.
+     *  If we're not able to completely reassemble a message, we'll
+     *  return control and wait for the next segment to come in. Upon
+     *  finishing this process, `_callback` is invoked with a single
+     *  node-style error argument.
      */
-    _reassemble_message: function (_message, _callback) {
+    _try_to_reassemble_message: function (_message, _callback) {
 
       var self = this;
 
+      self._request_return_segments(_message.id, function (_err, _segments) {
+
+        if (_err) {
+          return _callback(_err);
+        }
+
+        if (!_.isArray(_segments)) {
+          return _callback(new Error(
+            'Event handler `return_segments` returned invalid data'
+          ));
+        }
+
+        return _callback();
+      });
     },
+
     /**
      * @name initialize:
      */
@@ -526,18 +625,18 @@ exports.prototype = {
      *   `receive` (for being notified of single-part and fully-reassembled
      *   messages); `transmit` (for being notified of when a sent message
      *   has been successfully handed off to the telco for further
-     *   transmission); `receive_part` (for being notified of the receipt of
-     *   each individual part of a multipart/concatenated message); and
-     *   `return_parts` (invoked during message reassembly if a set of
-     *   previously-received message parts is needed to drive the reassembly
-     *   process).
+     *   transmission); `receive_segment` (for being notified of the receipt
+     *   of each individual segment of a multi-part/concatenated message);
+     *   and `return_segments` (invoked during message reassembly if any
+     *   previously-received message segments are needed to drive the
+     *   reassembly process).
      *
-     *   To obtain full support for multipart message reassembly, you *must*
-     *   handle both the `receive_part` and `return_parts` events.  The
-     *   `receive_part` callback must write the message part to persistent
-     *   storage before returning; the `return_parts` callback must fetch
-     *   and return all previously-stored message parts for a given message
-     *   identifier.
+     *   To obtain full support for multi-part message reassembly, you *must*
+     *   handle both the `receive_segment` and `return_segments` events. The
+     *   `receive_segment` callback must write the message segment to
+     *   persistent storage before returning; the `return_segments` callback
+     *   must fetch and return all previously-stored message segments for a
+     *   given message identifier.
      */
     on: function (_event, _callback) {
 
@@ -545,8 +644,8 @@ exports.prototype = {
         case 'delete':
         case 'receive':
         case 'transmit':
-        case 'receive_part':
-        case 'return_parts':
+        case 'receive_segment':
+        case 'return_segments':
           this._handlers[_event] = _callback;
           break;
         default:
@@ -622,7 +721,7 @@ exports.create = function (/* ... */) {
 /* Debug code */
 
 var m = exports.create({
-  prefix: '/srv/software/medic-core/v1.2.1/x86'
+  prefix: '/srv/software/medic-core/v1.2.2/x86'
 });
 
 m.on('receive', function (_message, _callback) {
@@ -635,23 +734,33 @@ m.on('transmit', function (_message, _result, _callback) {
   return _callback();
 });
 
-m.on('receive_part', function (_part, _callback) {
-  console.log('receive_part', _part);
-  return _callback();
-});
-
-m.on('return_parts', function (_id, _callback) {
-  console.log('return_parts', _id);
-  return _callback(null, []);
-});
-
 m.on('delete', function (_message) {
   console.log('delete', _message);
 });
 
+var segments = {};
+
+m.on('receive_segment', function (_message, _callback) {
+
+  if (!segments[_message.id]) {
+    segments[_message.id] = {};
+  }
+
+  segments[_message.id][_message.segment] = _message;
+  console.log('receive_segment', _message);
+
+  return _callback();
+});
+
+m.on('return_segments', function (_id, _callback) {
+
+  console.log('return_segments', _id);
+  return _callback(null, segments[_id]);
+});
+
 m.start();
 
-m.send('+15158226442', 'This is a test message', function() {
+m.send('+15158226442', 'This is a test message', function () {
   console.log('single transmit callback');
 });
 
