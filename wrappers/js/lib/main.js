@@ -202,6 +202,10 @@ exports.prototype = {
         _m.id = [ _m.from, (_m.udh || 0), _m.total_segments ].join('-');
       }
 
+      if (_m.timestamp) {
+        _m.timestamp = moment(_m.timestamp);
+      }
+
       return this;
     },
 
@@ -225,7 +229,7 @@ exports.prototype = {
             try {
               self._transform_received_message(_message);
             } catch (e) {
-              return _next_fn(e);
+              return _next_fn(); /* TODO: Handle error */
             }
 
             if (_message.total_segments <= 1) {
@@ -233,13 +237,15 @@ exports.prototype = {
               return _next_fn();
             }
 
-            self._notify_receive_segment(_message, function (_e) {
+            self._notify_receive_segment(_message, function (_er) {
 
-              if (_e) {
-                return _next_fn(_e);
+              if (_er) {
+                return _next_fn(); /* TODO: Handle error */
               }
 
-              self._try_to_reassemble_message(_message, _next_fn);
+              self._try_to_reassemble_message(_message, function (_e) {
+                _next_fn(); /* TODO: Handle error */
+              });
             });
           },
 
@@ -288,6 +294,10 @@ exports.prototype = {
           });
         },
         function (_err) {
+
+          if (_err) {
+            return _callback(_err);
+          }
 
           /* Finish up:
               Replace the inbound queue with the empty array;
@@ -496,14 +506,39 @@ exports.prototype = {
           return _callback(_err);
         }
 
-        if (!_.isArray(_segments)) {
+        if (_segments && !_.isArray(_segments)) {
           return _callback(new Error(
-            'Event handler `return_segments` returned invalid data'
+            'Event handler `return_segments` provided invalid data'
           ));
         }
 
         return _callback();
       });
+    },
+
+    /**
+     * @name _register_single_event:
+     */
+    _register_single_event: function (_event, _callback) {
+
+      if (!_.isFunction(_callback)) {
+        throw new Error('Event callback must be a function');
+      }
+
+      switch (_event) {
+        case 'delete':
+        case 'receive':
+        case 'transmit':
+        case 'receive_segment':
+        case 'return_segments':
+          this._handlers[_event] = _callback;
+          break;
+        default:
+          throw new Error('Invalid event specified');
+          break;
+      }
+
+      return this;
     },
 
     /**
@@ -637,20 +672,22 @@ exports.prototype = {
      *   persistent storage before returning; the `return_segments` callback
      *   must fetch and return all previously-stored message segments for a
      *   given message identifier.
+     *
+     *   The `_event` argument may be either a string or an object. If the
+     *   `_event` argument is provided as an object, then the `_callback`
+     *   argument is ignored. If the `_event` argument is a string, then
+     *   `_callback` must be an event-handling function.
      */
     on: function (_event, _callback) {
 
-      switch (_event) {
-        case 'delete':
-        case 'receive':
-        case 'transmit':
-        case 'receive_segment':
-        case 'return_segments':
-          this._handlers[_event] = _callback;
-          break;
-        default:
-          throw new Error('Invalid event specified');
-          break;
+      if (_.isObject(_event)) {
+        for (var name in _event) {
+          this._register_single_event(name, _event[name]);
+        }
+      } else if (_.isString(_event)) {
+        this._register_single_event(_event, _callback);
+      } else {
+        throw new Error('Invalid event name provided');
       }
 
       return this;
@@ -720,6 +757,8 @@ exports.create = function (/* ... */) {
 
 /* Debug code */
 
+var segments = {};
+
 var m = exports.create({
   prefix: '/srv/software/medic-core/v1.2.2/x86'
 });
@@ -738,24 +777,23 @@ m.on('delete', function (_message) {
   console.log('delete', _message);
 });
 
-var segments = {};
+m.on({
+  receive_segment: function (_message, _callback) {
 
-m.on('receive_segment', function (_message, _callback) {
+    if (!segments[_message.id]) {
+      segments[_message.id] = [];
+    }
+    segments[_message.id].push(_message);
+    console.log('receive_segment', _message);
 
-  if (!segments[_message.id]) {
-    segments[_message.id] = {};
+    return _callback();
+  },
+
+  return_segments: function (_id, _callback) {
+
+    console.log('return_segments', _id);
+    return _callback(null, segments[_id]);
   }
-
-  segments[_message.id][_message.segment] = _message;
-  console.log('receive_segment', _message);
-
-  return _callback();
-});
-
-m.on('return_segments', function (_id, _callback) {
-
-  console.log('return_segments', _id);
-  return _callback(null, segments[_id]);
 });
 
 m.start();
