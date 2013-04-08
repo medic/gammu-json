@@ -228,8 +228,9 @@ exports.prototype = {
 
             try {
               self._transform_received_message(_message);
-            } catch (e) {
-              return _next_fn(); /* TODO: Handle error */
+            } catch (_er) {
+              self._notify_receive_error(_message, e);
+              return _next_fn();
             }
 
             if (_message.total_segments <= 1) {
@@ -237,15 +238,22 @@ exports.prototype = {
               return _next_fn();
             }
 
-            self._notify_receive_segment(_message, function (_er) {
+            async.waterfall([
 
-              if (_er) {
-                return _next_fn(); /* TODO: Handle error */
+              function (_fn) {
+                self._notify_receive_segment(_message, _fn);
+              },
+
+              function (_fn) {
+                self._try_to_reassemble_message(_message, _fn);
+              }
+            ], function (_e) {
+
+              if (_e) {
+                self._notify_receive_error(_message, _e);
               }
 
-              self._try_to_reassemble_message(_message, function (_e) {
-                _next_fn(); /* TODO: Handle error */
-              });
+              return _next_fn();
             });
           },
 
@@ -274,10 +282,12 @@ exports.prototype = {
           self._notify_receive(_message, function (_error) {
 
             /* Error status:
-                If there was an error in delivery, then the message
-                is still on the device. Just forget about it for the
-                time being; we'll end up right back here during the
-                next delivery, and will see the same message again. */
+                If our instansiator reports an error in delivery, the
+                message is still on the device. Just forget about it for
+                the time being; we'll end up right back here during the
+                next delivery, and will see the same message again. Since
+                our instansiator was the one who rejected the message,
+                the error is already known; don't send an error event. */
 
             if (_error) {
               return _next_fn();
@@ -412,10 +422,9 @@ exports.prototype = {
 
       var fn = this._handlers.receive;
 
-      return (
-        fn ? fn.call(this, _message, _callback) :
-          _callback(new Error("No listener present for 'receive'"))
-      );
+      if (fn) {
+        fn.call(this, _message, _callback);
+      }
     },
 
     /**
@@ -430,10 +439,9 @@ exports.prototype = {
 
       var fn = this._handlers.receive_segment;
 
-      return (
-        fn ? fn.call(this, _message, _callback) :
-          _callback(new Error("No listener present for 'receive_segment'"))
-      );
+      if (fn) {
+        fn.call(this, _message, _callback);
+      }
     },
 
     /**
@@ -460,10 +468,9 @@ exports.prototype = {
 
       var fn = this._handlers.return_segments;
 
-      return (
-        fn ? fn.call(this, _id, _callback) :
-          _callback(new Error("No listener present for 'return_segments'"))
-      );
+      if (fn) {
+        fn.call(this, _id, _callback);
+      }
     },
 
     /**
@@ -480,6 +487,34 @@ exports.prototype = {
 
       if (fn) {
         fn.call(this, _message);
+      }
+    },
+
+    /**
+     * @name _notify_receive_error:
+     *   Invoke events appropriately when an error has occurred
+     *   somewhere inside of the receive pipeline.
+     */
+    _notify_receive_error: function (_message, _error) {
+
+      var fn = this._handlers.receive_error;
+
+      if (fn) {
+        fn.call(this, _message, _error);
+      }
+    },
+
+    /**
+     * @name _notify_transmit_error:
+     *   Invoke events appropriately when an error has occurred
+     *   somewhere inside of the message transmission pipeline.
+     */
+    _notify_transmit_error: function (_message, _error) {
+
+      var fn = this._handlers.transmit_error;
+
+      if (fn) {
+        fn.call(this, _message, _error);
       }
     },
 
@@ -529,6 +564,8 @@ exports.prototype = {
         case 'delete':
         case 'receive':
         case 'transmit':
+        case 'receive_error':
+        case 'transmit_error':
         case 'receive_segment':
         case 'return_segments':
           this._handlers[_event] = _callback;
@@ -687,7 +724,7 @@ exports.prototype = {
       } else if (_.isString(_event)) {
         this._register_single_event(_event, _callback);
       } else {
-        throw new Error('Invalid event name provided');
+        throw new Error('Event name has an invalid type');
       }
 
       return this;
@@ -793,6 +830,16 @@ m.on({
 
     console.log('return_segments', _id);
     return _callback(null, segments[_id]);
+  }
+});
+
+
+m.on({
+  receive_error: function (_message, _error) {
+    console.log('receive_error', _message, _error);
+  },
+  transmit_error: function (_message, _error) {
+    console.log('transmit_error', _message, _error);
   }
 });
 
