@@ -336,8 +336,16 @@ exports.prototype = {
         if (this._delete_batch_size <= i + 1) {
           break;
         }
-        
-        rv.push(_messages[i].location);
+
+        var locations = _messages[i].location;
+
+        if (!_.isArray(locations)) {
+          locations = [ locations ];
+        }
+
+        for (var j = 0, len = locations.length; j < len; ++j) {
+          rv.push(locations[j]);
+        }
       }
 
       return rv;
@@ -547,8 +555,90 @@ exports.prototype = {
           ));
         }
 
+        var index = self._build_reassembly_index(_message, _segments);
+
+        if (_.keys(index).length == _message.total_segments) {
+          //self._inbound_queue.push(
+            self._create_message_from_reassembly_index(index);
+          //);
+        }
+
         return _callback();
       });
+    },
+
+    /**
+     * @name _build_reassembly_index:
+     *  Using `_message` (a single message segment) and `_segments` (a
+     *  set of previously-received message segments), build an index to
+     *  aid in message reassembly.  For each segment, we first make sure
+     *  it has properties (e.g. `id` and `total_segments`) that are
+     *  consistent with `_message`. Then, we hash each segment to quickly
+     *  remove any duplicates and determine the quantity of segments
+     *  present. We take care to ensure that, in the case of duplicates,
+     *  the most recently-received part is used. This function does not
+     *  determine whether all parts are present, nor does it actually
+     *  perform reassembly -- it simply builds the data structure.
+     */
+    _build_reassembly_index: function (_message, _segments) {
+
+      var rv = {};
+
+      for (var i = 0, len = _segments.length; i < len; ++i) {
+        this._add_to_reassembly_index(rv, _message, _segments[i]);
+      }
+
+      this._add_to_reassembly_index(rv, _message, _message);
+      return rv;
+    },
+
+    /**
+     * @name _add_to_reassembly_index:
+     *   This function contains the actual validation and insertion
+     *   logic for `_build_reassembly_index`. This function adds a
+     *   single message segment `_m` to the reassembly index `_index`,
+     *   after validating it against the reference message `_message`.
+     *   Returns true if the message segment `_m` was valid; false
+     *   otherwise. If an item with the same segment number already
+     *   exists in the reassembly index and is newer than `_m`, this
+     *   function will return true *without* modifying the index.
+     */
+    _add_to_reassembly_index: function (_index, _message, _m) {
+
+      var total = _message.total_segments;
+
+      var is_valid = (
+        _.isObject(_m) && _m.id == _message.id &&
+          _.isNumber(_m.segment) && _m.segment <= total &&
+          _.isNumber(_m.total_segments) && _m.total_segments == total
+      )
+
+      if (!is_valid) {
+        return false;
+      }
+
+      if (_index[_m.segment] != null) {
+        if (_m.timestamp.isBefore(_index[_m.segment].timestamp)) {
+          return true;
+        }
+      }
+
+      _index[_m.segment] = _m;
+      return true;
+    },
+
+    /**
+     * @name: _create_message_from_reassembly_index:
+     *   Produce a new fully-reassembled message object, using the
+     *   message segments in the reassembly index `_index`. This
+     *   function will not modify any of the message segments in
+     *   `_index`, but *will* reference those message segments from the
+     *   newly-created message object. This function is synchronous,
+     *   and will either return the new message or throw an exception.
+     */
+    _create_message_from_reassembly_index: function (_index) {
+
+      return _index;
     },
 
     /**
@@ -845,7 +935,7 @@ m.on({
 
 m.start();
 
-m.send('+15158226442', 'This is a test message', function () {
-  console.log('single transmit callback');
-});
+//m.send('+15158226442', 'This is a test message', function () {
+//  console.log('single transmit callback');
+//});
 
