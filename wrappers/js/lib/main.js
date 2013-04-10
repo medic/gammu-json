@@ -308,7 +308,7 @@ exports.prototype = {
                 confirmed it has been written to the appropriate storage.
                 Add it to the delete queue to be cleared from the modem. */
 
-            self._deletion_queue.push(_message);
+            self._add_message_to_index(_message, self._deletion_index);
             _next_fn();
 
           });
@@ -337,28 +337,37 @@ exports.prototype = {
      *   These are command-line arguments for now, but might be sent
      *    via `stdin` instead once `gammu-json` actually supports it.
      */
-    _create_message_deletion_args: function (_messages) {
+    _create_message_deletion_args: function (_deletion_index) {
 
-      var rv = [];
+      var rv = [], i = 0;
 
-      for (var i = 0, len = _messages.length; i < len; ++i) {
+      for (var k in _deletion_index) {
 
         if (this._delete_batch_size <= i + 1) {
           break;
         }
 
-        var locations = _messages[i].location;
-
-        if (!_.isArray(locations)) {
-          locations = [ locations ];
-        }
-
-        for (var j = 0, l = locations.length; j < len; ++j) {
-          rv.push(locations[j]);
-        }
+        rv.push(k);
+        i++;
       }
 
       return rv;
+    },
+
+    /**
+     * @name _add_message_to_index:
+     */
+    _add_message_to_index: function (_message, _index) {
+
+      var locations = _message.location;
+
+      if (!_.isArray(locations)) {
+        locations = [ locations ];
+      }
+
+      for (var i = 0, len = locations.length; i < len; ++i) {
+        _index[locations[i]] = _message;
+      }
     },
 
     /**
@@ -368,35 +377,35 @@ exports.prototype = {
 
       var self = this;
 
-      var undeleted_messages = [];
-      var deletion_queue = self._deletion_queue;
+      var undeleted_messages = {};
+      var deletion_index = self._deletion_index;
 
-      if (deletion_queue.length <= 0) {
+      if (_.isEmpty(deletion_index)) {
         return _callback();
       }
 
       var args = [ 'delete' ].concat(
-        self._create_message_deletion_args(deletion_queue)
+        self._create_message_deletion_args(deletion_index)
       );
-
+console.log('_delete_messages:', args);
       self._subprocess('gammu-json', args, function (_err, _rv) {
 
         if (_err) {
           return _callback(_err);
         }
 
-        for (var i = 0, len = deletion_queue.length; i < len; ++i) {
+        for (var i in deletion_index) {
 
-          var message = deletion_queue[i];
-
-          if (_rv.detail[message.location] == 'ok') {
+          var message = deletion_index[i];
+console.log('rv:', _rv);
+          if (_rv.detail[i] == 'ok') {
             self._notify_delete(message);
           } else {
-            undeleted_messages.push(message);
+            self._add_message_to_index(message, undeleted_messages);
           }
         }
 
-        self._deletion_queue = undeleted_messages;
+        self._deletion_index = undeleted_messages;
       });
 
 
@@ -743,7 +752,7 @@ exports.prototype = {
 
       self._inbound_queue = [];
       self._outbound_queue = [];
-      self._deletion_queue = [];
+      self._deletion_index = {};
 
       self._is_polling = false;
       self._is_processing = false;
@@ -952,17 +961,17 @@ var m = exports.create({
 });
 
 m.on('receive', function (_message, _callback) {
-  console.log('receive', _message);
+  console.log('receive', _message.location);
   return _callback();
 });
 
 m.on('transmit', function (_message, _result, _callback) {
-  console.log('transmit', _message, _result);
+  console.log('transmit', _message.location, _result);
   return _callback();
 });
 
 m.on('deletion', function (_message) {
-  console.log('deletion', _message);
+  console.log('deletion', _message.location);
 });
 
 m.on({
@@ -972,14 +981,14 @@ m.on({
       segments[_message.id] = [];
     }
     segments[_message.id].push(_message);
-    console.log('receive_segment', _message);
+    //console.log('receive_segment', _message);
 
     return _callback();
   },
 
   return_segments: function (_id, _callback) {
 
-    console.log('return_segments', _id);
+    //console.log('return_segments', _id);
     return _callback(null, segments[_id]);
   }
 });
