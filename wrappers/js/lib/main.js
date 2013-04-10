@@ -418,10 +418,11 @@ exports.prototype = {
         _message.callback.call(this, _message, _result);
       }
 
-      return (
-        fn ? fn.call(this, _message, _result, _callback) :
-          _callback(new Error("No listener present for 'transmit'"))
-      );
+      if (!fn) {
+        return _callback(); /* Ignore */
+      }
+
+      fn.call(this, _message, _result, _callback);
     },
 
     /**
@@ -440,9 +441,13 @@ exports.prototype = {
 
       var fn = this._handlers.receive;
 
-      if (fn) {
-        fn.call(this, _message, _callback);
+      if (!fn) {
+        return _callback(
+          new Error('No handler registered for `receive`')
+        );
       }
+
+      fn.call(this, _message, _callback);
     },
 
     /**
@@ -457,9 +462,13 @@ exports.prototype = {
 
       var fn = this._handlers.receive_segment;
 
-      if (fn) {
-        fn.call(this, _message, _callback);
+      if (!fn) {
+        return _callback(
+          new Error('No handler registered for `receive_segment`')
+        );
       }
+
+      fn.call(this, _message, _callback);
     },
 
     /**
@@ -486,9 +495,13 @@ exports.prototype = {
 
       var fn = this._handlers.return_segments;
 
-      if (fn) {
-        fn.call(this, _id, _callback);
+      if (!fn) {
+        return _callback(
+          new Error('No handler registered for `return_segments`')
+        );
       }
+      
+      fn.call(this, _id, _callback);
     },
 
     /**
@@ -501,7 +514,7 @@ exports.prototype = {
      */
     _notify_delete: function (_message) {
 
-      var fn = this._handlers.delete;
+      var fn = this._handlers.deletion;
 
       if (fn) {
         fn.call(this, _message);
