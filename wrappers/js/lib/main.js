@@ -223,6 +223,7 @@ exports.prototype = {
     _receive_messages: function (_callback) {
 
       var self = this;
+      var reassembly_index = {};
 
       self._subprocess('gammu-json', [ 'retrieve' ], function (_err, _rv) {
 
@@ -230,24 +231,34 @@ exports.prototype = {
           return _callback(_err);
         }
 
+        /* For each incoming message:
+            Each message is processed concurrently so I/O can overlap. */
+
         async.each(_rv,
 
           function (_message, _next_fn) {
 
             try {
               self._transform_received_message(_message);
-            } catch (_er) {
-              self._notify_receive_error(_message, e);
+            } catch (_e) {
+              self._notify_receive_error(_message, _e);
               return _next_fn();
             }
 
-            /* Single-part message */
+            /* Single-part message:
+                This is easy; add it to the queue and bail out early. */
+
             if (_message.total_segments <= 1) {
               self._inbound_queue.push(_message);
               return _next_fn();
             }
 
-            /* Multi-part message */
+            /* Multi-part message:
+                This is a bit trickier; we keep track of the message
+                segments that we've used in a successful reassembly
+                operation so we don't double-deliver a message (e.g.
+                by reassembling segments `[ A, B ]` *and* `[ B, A ]`).*/
+
             async.waterfall([
 
               function (_fn) {
@@ -255,9 +266,38 @@ exports.prototype = {
               },
 
               function (_fn) {
-                self._try_to_reassemble_message(_message, _fn);
+
+                /* Check if segment was already used:
+                    We want to deliver a reassembled message exactly once.
+                    If this segment was previously used in a successful
+                    reassembly operation, don't try to reassemble again. */
+
+                if (self._message_in_index(_message, reassembly_index)) {
+                  return _fn();
+                }
+
+                /* Otherwise, try to reassemble:
+                    If the message is successfully reassembled here, then
+                    `_m` will be the fully reassembled message, and `_e`
+                    will be null. If both `_m` and `_e` are null, then we
+                    don't yet have all of the necessary message segments. */
+
+                self._try_to_reassemble_message(_message, function (_e, _m) {
+
+                  if (_m) {
+                    self._inbound_queue.push(_m);
+                    self._add_message_to_index(_m, reassembly_index);
+                  }
+
+                  _fn(_e);
+                });
               }
+
             ], function (_e) {
+
+              /* Item finished:
+                  Deliver a receive error if there was one, and report
+                  back to `async.each` that we've completed processing. */
 
               if (_e) {
                 self._notify_receive_error(_message, _e);
@@ -268,6 +308,10 @@ exports.prototype = {
           },
 
           function (_err) {
+
+            /* All messages finished:
+                Deliver an error if there was one, then proceed on
+                to deliver all messages that are in the inbound spool . */
 
             if (_err) {
               return _callback(_err);
@@ -289,7 +333,7 @@ exports.prototype = {
       async.each(self._inbound_queue,
 
         function (_message, _next_fn) {
-          self._notify_receive(_message, function (_error) {
+          self._notify_receive(_message, function (_err) {
 
             /* Error status:
                 If our instansiator reports an error in delivery, the
@@ -299,11 +343,11 @@ exports.prototype = {
                 our instansiator was the one who rejected the message,
                 the error is already known; don't send an error event. */
 
-            if (_error) {
+            if (_err) {
               return _next_fn();
             }
 
-            /* Success:
+            /* Successful delivery:
                 The message now belongs to someone else, who has
                 confirmed it has been written to the appropriate storage.
                 Add it to the delete queue to be cleared from the modem. */
@@ -371,6 +415,14 @@ exports.prototype = {
     },
 
     /**
+     * @name _message_in_index:
+     */
+    _message_in_index: function (_message, _index) {
+
+      return _.isObject(_index[_message.location]);
+    },
+
+    /**
      * @name _delete_messages:
      */
     _delete_messages: function (_callback) {
@@ -387,7 +439,7 @@ exports.prototype = {
       var args = [ 'delete' ].concat(
         self._create_message_deletion_args(deletion_index)
       );
-console.log('_delete_messages:', args);
+
       self._subprocess('gammu-json', args, function (_err, _rv) {
 
         if (_err) {
@@ -397,7 +449,7 @@ console.log('_delete_messages:', args);
         for (var i in deletion_index) {
 
           var message = deletion_index[i];
-console.log('rv:', _rv);
+
           if (_rv.detail[i] == 'ok') {
             self._notify_delete(message);
           } else {
@@ -406,10 +458,8 @@ console.log('rv:', _rv);
         }
 
         self._deletion_index = undeleted_messages;
+        return _callback();
       });
-
-
-      return _callback();
     },
 
     /**
@@ -560,20 +610,18 @@ console.log('rv:', _rv);
 
     /**
      * @name _try_to_reassemble_message:
-     *  Asynchronously trigger our instansiator's `return_segments`
-     *  handler, then attempt to completely reassemble `_message` using
-     *  what that event handler returned to us. If we're able to, add
-     *  the (now fully-reassembled) message to the inbound queue.
-     *  Before invoking this function, you must have already provided
-     *  `_message` to our instansiator via the `receive_segment` event.
-     *  If we're not able to completely reassemble a message, we'll
-     *  return control and wait for the next segment to come in. Upon
-     *  finishing this process, `_callback` is invoked with a single
-     *  node-style error argument.
+     *  Asynchronously trigger our instansiator's `return_segments` handler,
+     *  then attempt to completely reassemble `_message` using what that
+     *  event handler returned to us. If we're able to, yield the (now fully
+     *  reassembled) message back to our caller.  If we're not able to
+     *  completely reassemble a message, we'll return control and wait for
+     *  the next segment to come in. Upon finishing this process,
+     *  `_callback` is invoked with a single node-style error argument.
      */
     _try_to_reassemble_message: function (_message, _callback) {
 
       var self = this;
+      var rv = false;
 
       self._request_return_segments(_message.id, function (_err, _segments) {
 
@@ -582,24 +630,22 @@ console.log('rv:', _rv);
         }
 
         if (_segments && !_.isArray(_segments)) {
-          return _callback(new Error(
-            'Invalid data sent by `return_segments` callback'
-          ));
+          return _callback(
+            new Error('Non-array yielded by `return_segments` event')
+          );
         }
 
         try {
           var index = self._build_reassembly_index(_message, _segments);
 
           if (_.keys(index).length == _message.total_segments) {
-            self._inbound_queue.push(
-              self._create_message_from_reassembly_index(index)
-            );
+            rv = self._create_message_from_reassembly_index(index);
           }
         } catch (_er) {
           return _callback(_er);
         }
 
-        return _callback();
+        return _callback(null, rv);
       });
     },
 
@@ -981,14 +1027,14 @@ m.on({
       segments[_message.id] = [];
     }
     segments[_message.id].push(_message);
-    //console.log('receive_segment', _message);
+    console.log('receive_segment', _message.location);
 
     return _callback();
   },
 
   return_segments: function (_id, _callback) {
 
-    //console.log('return_segments', _id);
+    console.log('return_segments', _id);
     return _callback(null, segments[_id]);
   }
 });
