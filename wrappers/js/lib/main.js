@@ -12,6 +12,14 @@ var path = require('path'),
 exports.prototype = {
 
     /**
+     * @name _all_events:
+     */  
+    _all_events: {
+      deletion: 1, receive : 2, transmit: 3, receive_error: 4,
+      transmit_error: 5, receive_segment: 6, return_segments: 7
+    },
+
+    /**
      * @name _setenv:
      *   Set environment variable using a callback.
      */
@@ -233,11 +241,13 @@ exports.prototype = {
               return _next_fn();
             }
 
+            /* Single-part message */
             if (_message.total_segments <= 1) {
               self._inbound_queue.push(_message);
               return _next_fn();
             }
 
+            /* Multi-part message */
             async.waterfall([
 
               function (_fn) {
@@ -343,7 +353,7 @@ exports.prototype = {
           locations = [ locations ];
         }
 
-        for (var j = 0, len = locations.length; j < len; ++j) {
+        for (var j = 0, l = locations.length; j < len; ++j) {
           rv.push(locations[j]);
         }
       }
@@ -527,7 +537,7 @@ exports.prototype = {
     },
 
     /**
-     * @name _reassemble_message:
+     * @name _try_to_reassemble_message:
      *  Asynchronously trigger our instansiator's `return_segments`
      *  handler, then attempt to completely reassemble `_message` using
      *  what that event handler returned to us. If we're able to, add
@@ -551,16 +561,20 @@ exports.prototype = {
 
         if (_segments && !_.isArray(_segments)) {
           return _callback(new Error(
-            'Event handler `return_segments` provided invalid data'
+            'Invalid data sent by `return_segments` callback'
           ));
         }
 
-        var index = self._build_reassembly_index(_message, _segments);
+        try {
+          var index = self._build_reassembly_index(_message, _segments);
 
-        if (_.keys(index).length == _message.total_segments) {
-          //self._inbound_queue.push(
-            self._create_message_from_reassembly_index(index);
-          //);
+          if (_.keys(index).length == _message.total_segments) {
+            self._inbound_queue.push(
+              self._create_message_from_reassembly_index(index)
+            );
+          }
+        } catch (_er) {
+          return _callback(_er);
         }
 
         return _callback();
@@ -638,7 +652,51 @@ exports.prototype = {
      */
     _create_message_from_reassembly_index: function (_index) {
 
-      return _index;
+      /* One-based:
+          The `_index` argument is an object, not an array. */
+
+      var first_message = _index[1];
+
+      if (!_.isObject(first_message)) {
+        throw new Error('Reassembly failed; index missing first entry');
+      }
+
+      var rv = _.clone(first_message);
+
+      rv.id = false;
+      rv.segment = false;
+      rv.parts = [ first_message ];
+      rv.location = [ first_message.location ];
+
+      rv.timestamp = first_message.timestamp;
+      rv.smsc_timestamp = first_message.smsc_timestamp;
+
+      for (var i = 2; i <= rv.total_segments; ++i) {
+
+        var segment = _index[i];
+
+        if (!_.isObject(segment)) {
+          throw new Error('Reassembly failed; index is missing an entry');
+        }
+
+        /* Concatenated SMS */
+        rv.content += segment.content;
+
+        /* Keep references to each part */
+        rv.parts.push(segment);
+
+        /* Use a list of locations when deleting */
+        rv.location.push(segment.location);
+
+        /* Use latest timestamp */
+        for (var k in { timestamp: 0, smsc_timestamp: 1 }) {
+          if (rv[k] && rv[k].isBefore(segment[k])) {
+            rv[k] = segment[k];
+          }
+        }
+      }
+
+      return rv;
     },
 
     /**
@@ -650,21 +708,11 @@ exports.prototype = {
         throw new Error('Event callback must be a function');
       }
 
-      switch (_event) {
-        case 'delete':
-        case 'receive':
-        case 'transmit':
-        case 'receive_error':
-        case 'transmit_error':
-        case 'receive_segment':
-        case 'return_segments':
-          this._handlers[_event] = _callback;
-          break;
-        default:
-          throw new Error('Invalid event specified');
-          break;
+      if (!this._all_events[_event]) {
+        throw new Error('Invalid event specified');
       }
 
+      this._handlers[_event] = _callback;
       return this;
     },
 
@@ -900,8 +948,8 @@ m.on('transmit', function (_message, _result, _callback) {
   return _callback();
 });
 
-m.on('delete', function (_message) {
-  console.log('delete', _message);
+m.on('deletion', function (_message) {
+  console.log('deletion', _message);
 });
 
 m.on({
@@ -935,7 +983,7 @@ m.on({
 
 m.start();
 
-//m.send('+15158226442', 'This is a test message', function () {
-//  console.log('single transmit callback');
-//});
+m.send('+15158226442', 'This is a test message', function () {
+  console.log('single transmit callback');
+});
 
