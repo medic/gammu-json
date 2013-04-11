@@ -13,10 +13,12 @@ exports.prototype = {
 
     /**
      * @name _all_events:
+     *   An associative array (read: object) containing all available
+     *   event names as keys, and a unique number for each as values.
      */  
     _all_events: {
-      deletion: 1, receive : 2, transmit: 3, receive_error: 4,
-      transmit_error: 5, receive_segment: 6, return_segments: 7
+      receive : 1, transmit: 2, receive_error: 3,
+      transmit_error: 4, receive_segment: 5, return_segments: 6
     },
 
     /**
@@ -116,7 +118,7 @@ exports.prototype = {
         }
         
         rv.push(_messages[i].to);
-        rv.push(_messages[i].text);
+        rv.push(_messages[i].content);
       }
 
       return rv;
@@ -175,7 +177,7 @@ exports.prototype = {
               parts. To do this, `gammu-json` would need to be modified. */
 
           if (_r.result != 'success') {
-            unsent_messages.push(_message);
+            unsent_messages.push(message);
             return _next_fn();
           }
 
@@ -223,6 +225,8 @@ exports.prototype = {
     _receive_messages: function (_callback) {
 
       var self = this;
+
+      self._segment_cache = {};
       var reassembly_index = {};
 
       self._subprocess('gammu-json', [ 'retrieve' ], function (_err, _rv) {
@@ -254,10 +258,10 @@ exports.prototype = {
             }
 
             /* Multi-part message:
-                This is a bit trickier; we keep track of the message
-                segments that we've used in a successful reassembly
-                operation so we don't double-deliver a message (e.g.
-                by reassembling segments `[ A, B ]` *and* `[ B, A ]`).*/
+                This is a bit trickier -- we keep track of message segments
+                that we've already used in a prior successful reassembly;
+                we then use this information to avoid double-delivery of a
+                message (e.g. reassembling `[ A, B ]` *and* `[ B, A ]`). */
 
             async.waterfall([
 
@@ -265,15 +269,18 @@ exports.prototype = {
                 self._notify_receive_segment(_message, _fn);
               },
 
-              function (_fn) {
+              function (_should_delete, _fn) {
 
-                /* Check if segment was already used:
-                    We want to deliver a reassembled message exactly once.
-                    If this segment was previously used in a successful
-                    reassembly operation, don't try to reassemble again. */
+                if (self._message_index_lookup(_message, reassembly_index)) {
+                  return _next_fn();
+                }
 
-                if (self._message_in_index(_message, reassembly_index)) {
-                  return _fn();
+                /* Schedule for deletion:
+                    If we get here, then our instansiator successfully
+                    wrote this message segment to persistent storage. */
+
+                if (_should_delete) {
+                  self._schedule_message_for_deletion(_message);
                 }
 
                 /* Otherwise, try to reassemble:
@@ -286,7 +293,7 @@ exports.prototype = {
 
                   if (_m) {
                     self._inbound_queue.push(_m);
-                    self._add_message_to_index(_m, reassembly_index);
+                    self._message_index_add(_m, reassembly_index);
                   }
 
                   _fn(_e);
@@ -348,13 +355,13 @@ exports.prototype = {
             }
 
             /* Successful delivery:
-                The message now belongs to someone else, who has
-                confirmed it has been written to the appropriate storage.
-                Add it to the delete queue to be cleared from the modem. */
+                The message now belongs to someone else, who has confirmed
+                that it's now written to an appropriate persistent storage
+                device. Add any segments that haven't yet been deleted to
+                the deletion queue; they're removed in `_delete_messages`. */
 
-            self._add_message_to_index(_message, self._deletion_index);
+            self._schedule_message_for_deletion(_message);
             _next_fn();
-
           });
         },
         function (_err) {
@@ -399,9 +406,9 @@ exports.prototype = {
     },
 
     /**
-     * @name _add_message_to_index:
+     * @name _message_index_add:
      */
-    _add_message_to_index: function (_message, _index) {
+    _message_index_add: function (_message, _index) {
 
       var locations = _message.location;
 
@@ -415,11 +422,20 @@ exports.prototype = {
     },
 
     /**
-     * @name _message_in_index:
+     * @name _message_index_lookup:
      */
-    _message_in_index: function (_message, _index) {
+    _message_index_lookup: function (_message, _index) {
 
-      return _.isObject(_index[_message.location]);
+      return _index[_message.location];
+    },
+
+    /**
+     * @name _schedule_message_for_deletion:
+     */
+    _schedule_message_for_deletion: function (_message) {
+
+      this._message_index_add(_message, this._deletion_index);
+      _message.location = false;
     },
 
     /**
@@ -450,10 +466,8 @@ exports.prototype = {
 
           var message = deletion_index[i];
 
-          if (_rv.detail[i] == 'ok') {
-            self._notify_delete(message);
-          } else {
-            self._add_message_to_index(message, undeleted_messages);
+          if (_rv.detail[i] != 'ok') {
+            self._message_index_add(message, undeleted_messages);
           }
         }
 
@@ -511,73 +525,106 @@ exports.prototype = {
 
     /**
      * @name _notify_receive_segment:
-     *   Invoke events appropriately for a single segment of a multi-part
-     *   message. As in `_notify_receive`, the handler of this event must
-     *   call `_callback` once it has stored the message segment on some
-     *   form of reliable persistent storage. The callback takes no
-     *   arguments, aside from the usual node-style error argument.
+     *   Invoke events appropriately when a single segment of a multi-part
+     *   message arrives. As in `_notify_receive`, the handler of this event
+     *   is supplied with a callback function; once it has stored the
+     *   message segment on some form of reliable persistent storage, the
+     *   callback should be invoked with no arguments, other than a normal
+     *   node-style error parameter.
+     *
+     *   After the event is dispatched and our instansiator returns control
+     *   to us, we will invoke `_callback` with two arguments -- the first
+     *   will be a usual node-style error argument, and the second will be a
+     *   boolean value indicating whether or not a handler was actually
+     *   present and invoked (true if invoked; false if no handler was
+     *   registered at the time `_notify_receive_segment` was called.
+     *
+     *   A missing handler isn't an error condition; it just means that we
+     *   need to retain message parts on the modem itself until reassembly
+     *   can be completed. It is however *recommended* that you handle this
+     *   event, since many SMS modems have a small amount of storage and
+     *   would be vulnerable to denial-of-service attacks (e.g. by
+     *   deliberately sending a large number of multi-part messages with a
+     *   segment omitted).
      */
     _notify_receive_segment: function (_message, _callback) {
 
       var fn = this._handlers.receive_segment;
 
       if (!fn) {
-        return _callback(
-          new Error('No handler registered for `receive_segment`')
-        );
+        return this._default_receive_segment(_message, function (_err) {
+          return _callback(_err, false);
+        });
       }
 
-      fn.call(this, _message, _callback);
+      fn.call(this, _message, function (_err) {
+        _callback(_err, true);
+      });
     },
 
     /**
      * @name _request_return_segments:
-     *   Request an array of matching segments from our instansiator. A
-     *   "matching segment" is a message that has a `total_segments`
-     *   greater than one, and has an `id` property that matches the `_id`
-     *   argument supplied to us. These segments will have been previously
-     *   sent to our instansiator via the `reveive_segment` event. The
-     *   `return_segments` facility is used only when reassembling multi-part
-     *   messages, and allows for different storage methods to be "plugged
-     *   in" at any time.  This approach will frequently avoid the need
-     *   for an application to maintain multiple data stores.
+     *   Request an array of previously-delivered "matching segments" from
+     *   our instansiator. A "matching segment" is a message that has a
+     *   `total_segments` greater than one, and has an `id` property that
+     *   matches the `_id` argument supplied to us. These segments will have
+     *   been previously sent to our instansiator via the `receive_segment`
+     *   event. The `return_segments` event is invoked only when
+     *   reassembling multi-part messages; it allows for different storage
+     *   methods to be "plugged in" at any time. This approach can avoid the
+     *   need for an application to maintain multiple data stores.
      *
-     *   The `_callback` function must be invoked by our instanansiator
-     *   once the appropriate message segments have been brought back in
-     *   to main memory.  The callback's first argument must be a
-     *   node-style error argument (or null if no error occurred); the
-     *   second argument must be an array of message objects with matching
-     *   `id`s. The second argument is ignored if the first argument
-     *   indicates an error.
+     *   We provide a callback to the handler of this event. Once the
+     *   appropriate message segments have been brought back in to main
+     *   memory, and the caller is ready to transfer control back to us, the
+     *   callback should invoked. Its first argument must be a node-style
+     *   error argument (or null if no error occurred); its second argument
+     *   must be an array of message objects with identifiers that match
+     *   our `_id` parameter. The second argument is ignored if the first
+     *   argument indicates an error.
+     *
+     *   When control is transferred back to us, we invoke `_callback` with
+     *   three arguments: a node-style error argument, followed by an array
+     *   of matching message objects (or `[]` if no matches were found),
+     *   followed by a boolean value indicating whether or not a handler was
+     *   present at the time `_request_return_segments` was called.
      */
     _request_return_segments: function (_id, _callback) {
 
       var fn = this._handlers.return_segments;
 
       if (!fn) {
-        return _callback(
-          new Error('No handler registered for `return_segments`')
-        );
+        return this._default_return_segments(_id, function (_e, _rv) {
+          return _callback(_e, _rv, false);
+        });
       }
       
-      fn.call(this, _id, _callback);
+      fn.call(this, _id, function (_err, _messages) {
+        return _callback(_err, _messages, true);
+      });
     },
 
     /**
-     * @name _notify_delete:
-     *   Invoke events appropriately when a message is deleted from the
-     *   device. This may be helpful to callers who want to detect and
-     *   avoid duplicate messages in a deletion failure situation. This
-     *   function is synchronous; it does not wait for the caller to
-     *   perform any required asynchronous work -- we're all done.
+     * @name _default_receive_segment:
      */
-    _notify_delete: function (_message) {
+    _default_receive_segment: function (_message, _callback) {
 
-      var fn = this._handlers.deletion;
+      var id = _message.id;
 
-      if (fn) {
-        fn.call(this, _message);
+      if (!this._segment_cache[id]) {
+        this._segment_cache[id] = [];
       }
+
+      this._segment_cache[id].push(_message);
+      return _callback();
+    },
+
+    /**
+     * @name _default_return_segments:
+     */
+    _default_return_segments: function (_id, _callback) {
+
+      return _callback(null, this._segment_cache[_id]);
     },
 
     /**
@@ -732,12 +779,16 @@ exports.prototype = {
       var rv = _.clone(first_message);
 
       rv.id = false;
+      rv.location = [];
       rv.segment = false;
-      rv.parts = [ first_message ];
-      rv.location = [ first_message.location ];
 
+      rv.parts = [ first_message ];
       rv.timestamp = first_message.timestamp;
       rv.smsc_timestamp = first_message.smsc_timestamp;
+
+      if (first_message.location) {
+        rv.location.push(first_message.location);
+      }
 
       for (var i = 2; i <= rv.total_segments; ++i) {
 
@@ -754,7 +805,9 @@ exports.prototype = {
         rv.parts.push(segment);
 
         /* Use a list of locations when deleting */
-        rv.location.push(segment.location);
+        if (segment.location) {
+          rv.location.push(segment.location);
+        }
 
         /* Use latest timestamp */
         for (var k in { timestamp: 0, smsc_timestamp: 1 }) {
@@ -807,6 +860,19 @@ exports.prototype = {
         _.isNumber(options.interval) ?
           (options.interval * 1000) : 10000 /* Seconds to milliseconds */
       );
+
+     /* Segment cache:
+         If the `receive_segment` and `return_segments` events don't both
+         have handlers, then we don't have any persistent storage other than
+         what's on the modem itself. In this case, we provide default event
+         handlers. The default handlers store messages in this cache for
+         the lifetime of the receive and reassembly processes. When we
+         lack these event handlers, we also don't delete message
+         segments from the modem until they're used in a successful
+         reassembly operation. Since message parts remain on the modem,
+         this cache is cleared at the beginning of `_receive_messages`. */
+
+      self._segment_cache = {};
 
       /* Transmit batch size:
           This is the highest number of outbound messages that will be
@@ -890,7 +956,7 @@ exports.prototype = {
           This queue is consumed by `_transmit_messages`. */
 
       this._outbound_queue.push({
-        to: _to, text: _message,
+        to: _to, content: _message,
         context: _context, callback: _transmit_callback
       });
 
@@ -1007,18 +1073,15 @@ var m = exports.create({
 });
 
 m.on('receive', function (_message, _callback) {
-  console.log('receive', _message.location);
+  console.log('receive', _message.content);
   return _callback();
 });
 
 m.on('transmit', function (_message, _result, _callback) {
-  console.log('transmit', _message.location, _result);
+  console.log('transmit', _message, _result);
   return _callback();
 });
 
-m.on('deletion', function (_message) {
-  console.log('deletion', _message.location);
-});
 
 m.on({
   receive_segment: function (_message, _callback) {
@@ -1027,7 +1090,7 @@ m.on({
       segments[_message.id] = [];
     }
     segments[_message.id].push(_message);
-    console.log('receive_segment', _message.location);
+    console.log('receive_segment', _message.id, _message.location);
 
     return _callback();
   },
