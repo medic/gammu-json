@@ -67,9 +67,10 @@ directly to your preferred `$prefix/lib/pkgconfig` directory.
 Setup
 -----
 
-Currently, `gammu-json` requires that (a) you have a valid `/etc/gammurc` file
-(or symbolic link), and (b) that configuration file provides a working
-phone/modem configuration in its `gammu` section. Here's a simple example:
+By default, `gammu-json` requires that (a) you have a valid `/etc/gammurc`
+file (or symbolic link) present in your local filesystem, and (b) that
+`/etc/gammurc` provides a working phone/modem configuration in its `gammu`
+section. Here's a simple example:
 
 ```
 [gammu]
@@ -77,9 +78,8 @@ Connection = at
 Device = /dev/ttyUSB0
 ```
 
-Future modifications will remove this requirement, and allow you to provide
-device and configuration information as command-line arguments. For now,
-though, creating this file is the simplest way to get started.
+If your gammu configuration file is located elsewhere, you may use the
+`-c` or `--config` option to specify a custom configuration file path.
 
 Licensing
 ---------
