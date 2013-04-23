@@ -498,6 +498,9 @@ numbered one to four. Deleting non-existent messages is not an error;
 rather the nonexistent messages are noted in the `totals.attempted`
 property, and the `result` of the deletion is reported as `partial`.
 
+```shell
+$ gammu-json delete 1 2 3 5
+```
 ```json
 {
    "detail" : {
