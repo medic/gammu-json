@@ -1388,8 +1388,10 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     free(smsc);
     free(info);
 
-  cleanup:
+  cleanup_json:
     printf("]\n");
+  
+  cleanup:
     return rv;
 }
 
