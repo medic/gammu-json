@@ -5,7 +5,8 @@ LDFLAGS := -lm
 CFLAGS := -Wall -Os -g
 
 PREFIX ?= /usr
-PKG_CONFIG = PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:$(PREFIX)/lib/pkgconfig" pkg-config
+PKG_CONFIG_PATH = ${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig
+PKG_CONFIG = PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:${PKG_CONFIG_PATH}" pkg-config
 
 GAMMU_LDFLAGS := $(shell $(PKG_CONFIG) --libs gammu 2>/dev/null)
 GAMMU_CFLAGS := $(shell $(PKG_CONFIG) --cflags gammu 2>/dev/null)
