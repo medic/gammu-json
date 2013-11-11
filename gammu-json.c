@@ -22,6 +22,9 @@ const static char *usage_text = (
   "\n"
   "  -c, --config <file>        Specify path to Gammu configuration file\n"
   "                             (default: /etc/gammurc)\n"
+  "\n"
+  "  -v, --verbose              Ask Gammu to print debugging information\n"
+  "                             to stderr while performing operations.\n"
   "Commands:\n"
   "\n"
   "  retrieve                   Retrieve all messages from a device, as a\n"
@@ -58,6 +61,7 @@ typedef uint8_t boolean_t;
 typedef struct app_options {
 
   boolean_t invalid;
+  boolean_t verbose;
   char *application_name;
   char *gammu_configuration_path;
 
@@ -240,6 +244,7 @@ delete_status_t *initialize_delete_status(delete_status_t *d) {
 app_options_t *initialize_application_options(app_options_t *o) {
 
   o->invalid = FALSE;
+  o->verbose = FALSE;
   o->application_name = NULL;
   o->gammu_configuration_path = NULL;
 
@@ -665,6 +670,20 @@ gammu_state_t *gammu_create_if_necessary(gammu_state_t **sp) {
 
   if (!rv) {
     return NULL;
+  }
+
+  if (app.verbose) {
+
+    /* Enable global debugging to stderr */
+    GSM_Debug_Info *debug_info = GSM_GetGlobalDebug();
+    GSM_SetDebugFileDescriptor(stderr, TRUE, debug_info);
+    GSM_SetDebugLevel("textall", debug_info);
+
+    /* Enable state machine debugging to stderr */
+    debug_info = GSM_GetDebug(rv->sm);
+    GSM_SetDebugGlobal(FALSE, debug_info);
+    GSM_SetDebugFileDescriptor(stderr, TRUE, debug_info);
+    GSM_SetDebugLevel("textall", debug_info);
   }
 
   *sp = rv;
@@ -1411,9 +1430,9 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
     if (strcmp(*argp, "-c") == 0 || strcmp(*argp, "--config") == 0) {
 
       if (*++argp == NULL) {
-	fprintf(stderr, "Error: no configuration file name provided\n");
-	o->invalid = TRUE;
-	break;
+        fprintf(stderr, "Error: no configuration file name provided\n");
+        o->invalid = TRUE;
+        break;
       }
 
       o->gammu_configuration_path = *argp++;
@@ -1422,6 +1441,13 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
       continue;
     }
 
+    if (strcmp(*argp, "-v") == 0 || strcmp(*argp, "--verbose") == 0) {
+      o->verbose = TRUE;
+      ++argp; ++rv;
+      continue;
+    }
+
+      ++rv;
     break;
   }
 
