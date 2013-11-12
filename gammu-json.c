@@ -502,6 +502,7 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
   int n = TIMESTAMP_MAX_WIDTH;
   char *rv = (char *) malloc_and_zero(n);
 
+  #pragma warning(disable : 4996) 
   snprintf(
     rv, n, "%.4d-%.2d-%.2d %.2d:%.2d:%.2d",
       t->Year, t->Month, t->Day, t->Hour, t->Minute, t->Second
