@@ -32,7 +32,8 @@ clean-dependencies:
 	cd dependencies && $(MAKE) clean
 
 build-gammu-json: build-dependencies
-	gcc -o gammu-json gammu-json.c -Idependencies/jsmn -ljsmn \
+	gcc -o gammu-json gammu-json.c \
+		-Idependencies/jsmn -Ldependencies/jsmn -ljsmn \
 		$(C99) $(CFLAGS) $(LDFLAGS) $(GAMMU_CFLAGS) $(GAMMU_LDFLAGS)
 
 clean: clean-dependencies
