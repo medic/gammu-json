@@ -12,7 +12,7 @@ libjsmn.a: jsmn.o
 test: jsmn-test
 	./jsmn-test
 
-jsmn_test: jsmn_test.o
+jsmn_test: jsmn-test.o
 	$(CC) -L. -ljsmn $< -o $@
 
 jsmn_test.o: jsmn_test.c libjsmn.a
