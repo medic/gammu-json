@@ -14,7 +14,7 @@ Philosophy
 Most JSON parsers offer you a bunch of functions to load JSON data, parse it,
 and extract any value by its name. The author of jsmn believes that checking
 the correctness of every JSON packet or allocating temporary objects to store
-parsed JSON fields often is an overkill. 
+parsed JSON fields often is an overkill.
 
 The JSON format itself is extremely simple, so why should we complicate it?
 

@@ -9,8 +9,8 @@ libjsmn.a: jsmn.o
 %.o: %.c jsmn.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
-test: jsmn_test
-	./jsmn_test
+test: jsmn-test
+	./jsmn-test
 
 jsmn_test: jsmn_test.o
 	$(CC) -L. -ljsmn $< -o $@
@@ -19,7 +19,7 @@ jsmn_test.o: jsmn_test.c libjsmn.a
 
 clean:
 	rm -f jsmn.o jsmn_test.o
-	rm -f jsmn_test
+	rm -f jsmn-test
 	rm -f libjsmn.a
 
 .PHONY: all clean test
