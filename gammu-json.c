@@ -337,8 +337,11 @@ void bitfield_destroy(bitfield_t *bf) {
 
 /**
  * @name bitfield_test:
- *   Return true if the one-based bit `bit` is set. Returns true
- *   on success, false if `bit` is out of range for this bitfield.
+ *   Return true if the (zero-based or one-based) bit `bit` is set.
+ *   Returns true on success, false if `bit` is out of range for this
+ *   bitfield. You may use either zero-based addressing or one-based
+ *   addressing, as long as you remain consistent for each instance
+ *   of a bitfield_t.
  */
 boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
 
@@ -354,11 +357,14 @@ boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
 
 /**
  * @name bitfield_set:
- *   Set the one-based bit `bit` to one if `value` is true,
- *   otherwise set the bit to zero. Returns true on success, false
- *   if the bit `bit` is out of range for this particular bitfield.
+ *   Set the (zero-based or one-based) bit `bit` to one if `value` is
+ *   true, otherwise set the bit to zero. Returns true on success, false
+ *   if the bit `bit` is out of range for this particular bitfield.  You
+ *   may use either zero-based addressing or one-based addressing, as
+ *   long as you remain consistent for each instance of a bitfield_t.
  */
-boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t value) {
+boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t
+        value) {
 
   if (bit > bf->n) {
     return FALSE;
