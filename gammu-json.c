@@ -389,9 +389,11 @@ boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t value) {
 /**
  * @name find_maximum_integer_argument:
  */
-long find_maximum_integer_argument(char *argv[]) {
+boolean_t find_maximum_integer_argument(unsigned long *rv, char *argv[]) {
 
-  int rv = -1;
+  unsigned long max = 0;
+  boolean_t found = FALSE;
+
   for (int i = 0; argv[i] != NULL; i++) {
 
     char *err = NULL;
@@ -401,12 +403,14 @@ long find_maximum_integer_argument(char *argv[]) {
       continue;
     }
 
-    if(n > -1 && n > rv) {
-      rv = n;
+    if (n > max) {
+      max = n;
+      found = TRUE;
     }
   }
 
-  return rv;
+  *rv = max;
+  return found;
 }
 
 /**
@@ -1099,9 +1103,10 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   if (!delete_all) {
 
-    long n = find_maximum_integer_argument(&argv[1]);
+    unsigned long n;
+    boolean_t found = find_maximum_integer_argument(&n, &argv[1]);
 
-    if (n > -1) {
+    if (!found) {
       fprintf(stderr, "Error: no valid location(s) specified\n");
       rv = 2; goto cleanup;
     }
