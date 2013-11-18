@@ -7,6 +7,7 @@
 #include <inttypes.h>
 
 #include <gammu.h>
+#include <jsmn.h>
 
 #define TIMESTAMP_MAX_WIDTH (64)
 #define BITFIELD_CELL_WIDTH (CHAR_BIT)
@@ -18,28 +19,38 @@ const static char *usage_text = (
   "\n"
   "Global options:\n"
   "\n"
-  "  -h, --help                 Print this useful message\n"
+  "  -c, --config <file>       Specify path to Gammu configuration file\n"
+  "                            (default: /etc/gammurc).\n"
   "\n"
-  "  -c, --config <file>        Specify path to Gammu configuration file\n"
-  "                             (default: /etc/gammurc)\n"
+  "  -h, --help                Print this helpful message.\n"
   "\n"
-  "  -v, --verbose              Ask Gammu to print debugging information\n"
-  "                             to stderr while performing operations.\n"
+  "  -r, --repl                Run in `read, evaluate, print' loop mode.\n"
+  "                            Read a single-line JSON-encoded command\n"
+  "                            from stdin, execute the command, then\n"
+  "                            print its result as a single line of JSON\n"
+  "                            on stdout. Repeat this until end-of-file is\n"
+  "                            reached on stdin. If a command is provided\n"
+  "			       via command-line arguments, execute it before\n"
+  "			       attempting to read more commands from stdin.\n"
+  "\n"
+  "  -v, --verbose             Ask Gammu to print debugging information\n"
+  "                            to stderr while performing operations.\n"
+  "\n"
   "Commands:\n"
   "\n"
-  "  retrieve                   Retrieve all messages from a device, as a\n"
-  "                             JSON-encoded array of objects, on stdout.\n"
+  "  retrieve                  Retrieve all messages from a device, as a\n"
+  "                            JSON-encoded array of objects, on stdout.\n"
   "\n"
-  "  delete { all | N... }      Delete one or more messages from a device,\n"
-  "                             using location numbers to identify them.\n"
-  "                             Specify 'all' to delete any messages found.\n"
-  "                             Prints JSON-encoded information about any\n"
-  "                             deleted/skipped/missing messages on stdout.\n"
+  "  delete { all | N... }     Delete one or more messages from a device,\n"
+  "                            using location numbers to identify them.\n"
+  "                            Specify `all' to delete any messages found.\n"
+  "                            Prints JSON-encoded information about any\n"
+  "                            deleted/skipped/missing messages on stdout.\n"
   "\n"
-  "  send { phone text }...     Send one or more messages. Each message is\n"
-  "                             sent to exactly one phone number. Prints\n"
-  "                             JSON-encoded information about the sent\n"
-  "                             messages on stdout.\n"
+  "  send { phone text }...    Send one or more messages. Each message is\n"
+  "                            sent to exactly one phone number. Prints\n"
+  "                            JSON-encoded information about the sent\n"
+  "                            messages on stdout.\n"
   "About:\n"
   "\n"
   "  Copyright (c) 2013 David Brown <hello at scri.pt>.\n"
@@ -60,6 +71,8 @@ typedef uint8_t boolean_t;
  */
 typedef struct app_options {
 
+  boolean_t help;
+  boolean_t repl;
   boolean_t invalid;
   boolean_t verbose;
   char *application_name;
@@ -243,6 +256,8 @@ delete_status_t *initialize_delete_status(delete_status_t *d) {
  */
 app_options_t *initialize_application_options(app_options_t *o) {
 
+  o->help = FALSE;
+  o->repl = FALSE;
   o->invalid = FALSE;
   o->verbose = FALSE;
   o->application_name = NULL;
@@ -282,6 +297,24 @@ static int usage() {
   return 127;
 }
 
+/**
+ * @name print_usage_error:
+ */
+static void print_usage_error(const char *s) {
+
+  fprintf(stderr, "Error: %s.\n", s);
+  fprintf(stderr, "Use `-h' or `--help' to view usage information.\n");
+}
+
+/**
+ * @name print_operation_error:
+ */
+static void print_operation_error(const char *s) {
+
+  fprintf(stderr, "Error: %s.\n", s);
+  fprintf(stderr, "Please check your command and try again.\n");
+  fprintf(stderr, "Check Gammu's configuration if difficulties persist.\n");
+}
 /**
  * @name utf8_string_length:
  */
@@ -517,7 +550,10 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
   int n = TIMESTAMP_MAX_WIDTH;
   char *rv = (char *) malloc_and_zero(n);
 
-  #pragma warning(disable : 4996) 
+  #ifdef _WIN32
+    #pragma warning(disable: 4996)
+  #endif
+
   snprintf(
     rv, n, "%.4d-%.2d-%.2d %.2d:%.2d:%.2d",
       t->Year, t->Month, t->Day, t->Hour, t->Minute, t->Second
@@ -873,12 +909,12 @@ int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    fprintf(stderr, "Error: failed to start gammu; check configuration\n");
+    print_operation_error("failed to start gammu");
     rv = 1; goto cleanup;
   }
 
   if (!print_messages_json_utf8(s)) {
-    fprintf(stderr, "Error: failed to retrieve one or more messages\n");
+    print_operation_error("failed to retrieve one or more messages");
     rv = 2; goto cleanup;
   }
 
@@ -893,7 +929,7 @@ int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
  */
 void print_deletion_detail_json_utf8(message_t *sms,
                                      delete_stage_t r,
-				     boolean_t is_start) {
+                                     boolean_t is_start) {
   if (!is_start) {
     printf(", ");
   }
@@ -1100,8 +1136,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   bitfield_t *bf = NULL;
 
   if (argc < 2) {
-    usage();
-    fprintf(stderr, "Error: deletion location(s) must be specified\n");
+    print_usage_error("deletion location(s) must be specified");
     return 1;
   }
 
@@ -1113,24 +1148,24 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     boolean_t found = find_maximum_integer_argument(&n, &argv[1]);
 
     if (!found) {
-      fprintf(stderr, "Error: no valid location(s) specified\n");
+      print_usage_error("no valid location(s) specified");
       rv = 2; goto cleanup;
     }
 
     if (n == ULONG_MAX && errno == ERANGE) {
-      fprintf(stderr, "Error: integer argument would overflow\n");
+      print_usage_error("integer argument would overflow");
       rv = 3; goto cleanup;
     }
 
     bf = bitfield_create(n);
 
     if (!bf) {
-      fprintf(stderr, "Error: failed to create deletion index\n");
+      print_operation_error("failed to create deletion index");
       rv = 4; goto cleanup_delete;
     }
 
     if (!bitfield_set_integer_arguments(bf, &argv[1])) {
-      fprintf(stderr, "Error: one or more location(s) are invalid\n");
+      print_operation_error("one or more location(s) are invalid");
       rv = 5; goto cleanup_delete;
     }
   }
@@ -1138,14 +1173,14 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    fprintf(stderr, "Error: failed to initialize gammu\n");
+    print_operation_error("failed to initialize gammu");
     rv = 6; goto cleanup_delete;
   }
 
   printf("{");
 
   if (!delete_selected_messages(s, bf)) {
-    fprintf(stderr, "Error: failed to delete one or more messages\n");
+    print_operation_error("failed to delete one or more messages");
     rv = 7; goto cleanup_json;
   }
 
@@ -1259,14 +1294,12 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   char **argp = &argv[1];
 
   if (argc <= 2) {
-    usage();
-    fprintf(stderr, "Error: Not enough arguments provided\n");
+    print_usage_error("not enough arguments provided");
     return 1;
   }
 
   if (argc % 2 != 1) {
-    usage();
-    fprintf(stderr, "Error: Odd number of arguments provided\n");
+    print_usage_error("odd number of arguments provided");
     return 2;
   }
 
@@ -1284,7 +1317,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    fprintf(stderr, "Error: Failed to start gammu subsystem\n");
+    print_operation_error("failed to start gammu subsystem");
     rv = 3; goto cleanup;
   }
 
@@ -1292,7 +1325,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   smsc->Location = 1;
 
   if ((s->err = GSM_GetSMSC(s->sm, smsc)) != ERR_NONE) {
-    fprintf(stderr, "Error: Failed to discover SMSC number\n");
+    print_operation_error("failed to discover SMSC phone number");
     rv = 4; goto cleanup_sms;
   }
 
@@ -1434,14 +1467,14 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
   while (*argp != NULL) {
 
     if (strcmp(*argp, "-h") == 0 || strcmp(*argp, "--help") == 0) {
-      o->invalid = TRUE;
+      o->help = TRUE;
       break;
     }
 
     if (strcmp(*argp, "-c") == 0 || strcmp(*argp, "--config") == 0) {
 
       if (*++argp == NULL) {
-        fprintf(stderr, "Error: no configuration file name provided\n");
+	print_usage_error("no configuration file name provided");
         o->invalid = TRUE;
         break;
       }
@@ -1458,7 +1491,12 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
       continue;
     }
 
-      ++rv;
+    if (strcmp(*argp, "-r") == 0 || strcmp(*argp, "--repl") == 0) {
+      o->repl = TRUE;
+      ++argp; ++rv;
+      continue;
+    }
+
     break;
   }
 
@@ -1482,24 +1520,27 @@ int main(int argc, char *argv[]) {
   int n = parse_global_arguments(argc, argp, &app);
 
   if (app.invalid) {
+    print_usage_error("one or more invalid argument(s) provided");
+    goto cleanup;
+  }
+  
+  if (app.help) {
     usage();
-    fprintf(stderr, "Error: one or more invalid argument(s) provided\n");
     goto cleanup;
   }
 
   argc -= n;
   argp += n;
 
-  if (argc < 1) {
-    usage();
-    fprintf(stderr, "Error: no command specified\n");
+  if (argc <= 0 && !app.repl) {
+    print_usage_error("no command specified");
     goto cleanup;
   }
 
   /* Option #1:
    *   Retrieve all messages as a JSON array. */
 
-  if (strcmp(argp[0], "retrieve") == 0) {
+  if (argc > 0 && strcmp(argp[0], "retrieve") == 0) {
     rv = action_retrieve_messages(&s, argc, argp);
     goto cleanup;
   }
@@ -1507,7 +1548,7 @@ int main(int argc, char *argv[]) {
   /* Option #2:
    *   Delete messages specified in `argv` (or all messages). */
 
-  if (strcmp(argp[0], "delete") == 0) {
+  if (argc > 0 && strcmp(argp[0], "delete") == 0) {
     rv = action_delete_messages(&s, argc, argp);
     goto cleanup;
   }
@@ -1515,7 +1556,7 @@ int main(int argc, char *argv[]) {
   /* Option #3:
    *   Send one or more messages, each to a single recipient. */
 
-  if (strcmp(argp[0], "send") == 0) {
+  if (argc > 0 && strcmp(argp[0], "send") == 0) {
     rv = action_send_messages(&s, argc, argp);
     goto cleanup;
   }
@@ -1523,8 +1564,9 @@ int main(int argc, char *argv[]) {
   /* No other valid options:
    *  Display message and usage information. */
 
-  rv = usage();
-  fprintf(stderr, "Error: invalid action specified\n");
+  if (!app.repl) {
+    print_usage_error("invalid action specified");
+  }
 
   cleanup:
     if (s) {
