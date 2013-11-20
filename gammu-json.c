@@ -1504,6 +1504,45 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
 }
 
 /**
+ * @name process_action:
+ *   Execute an action, based upon the arguments provided.
+ *   The `argv[0]` argument should contain a single command
+ *   (currently either `send`, `retrieve`, or `delete`); the
+ *   remaining items in `argv` are parameters to be provided to
+ *   the specified command. Return `true` if a command was
+ *   executed (whether successfully or resulting in an error),
+ *   or `false` if the command specified was not found.
+ */
+boolean_t process_action(int argc, char *argv[]) {
+
+  /* Option #1:
+   *   Retrieve all messages as a JSON array. */
+
+  if (argc > 0 && strcmp(argp[0], "retrieve") == 0) {
+    rv = action_retrieve_messages(&s, argc, argp);
+    return true;
+  }
+
+  /* Option #2:
+   *   Delete messages specified in `argv` (or all messages). */
+
+  if (argc > 0 && strcmp(argp[0], "delete") == 0) {
+    rv = action_delete_messages(&s, argc, argp);
+    return true;
+  }
+
+  /* Option #3:
+   *   Send one or more messages, each to a single recipient. */
+
+  if (argc > 0 && strcmp(argp[0], "send") == 0) {
+    rv = action_send_messages(&s, argc, argp);
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * @name main:
  */
 int main(int argc, char *argv[]) {
@@ -1537,31 +1576,14 @@ int main(int argc, char *argv[]) {
     goto cleanup;
   }
 
-  /* Option #1:
-   *   Retrieve all messages as a JSON array. */
+  /* Execute action:
+   *   This runs the operation provided via command-line arguments. */
 
-  if (argc > 0 && strcmp(argp[0], "retrieve") == 0) {
-    rv = action_retrieve_messages(&s, argc, argp);
+  if (process_action(argc, argv)) {
     goto cleanup;
   }
 
-  /* Option #2:
-   *   Delete messages specified in `argv` (or all messages). */
-
-  if (argc > 0 && strcmp(argp[0], "delete") == 0) {
-    rv = action_delete_messages(&s, argc, argp);
-    goto cleanup;
-  }
-
-  /* Option #3:
-   *   Send one or more messages, each to a single recipient. */
-
-  if (argc > 0 && strcmp(argp[0], "send") == 0) {
-    rv = action_send_messages(&s, argc, argp);
-    goto cleanup;
-  }
-
-  /* No other valid options:
+  /* No valid action specified:
    *  Display message and usage information. */
 
   if (!app.repl) {
