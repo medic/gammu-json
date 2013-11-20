@@ -1513,33 +1513,34 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
  *   executed (whether successfully or resulting in an error),
  *   or `false` if the command specified was not found.
  */
-boolean_t process_action(int argc, char *argv[]) {
+boolean_t process_action(gammu_state_t *s,
+			 int argc, char *argv[], int *rv) {
 
   /* Option #1:
    *   Retrieve all messages as a JSON array. */
 
-  if (argc > 0 && strcmp(argp[0], "retrieve") == 0) {
-    rv = action_retrieve_messages(&s, argc, argp);
-    return true;
+  if (argc > 0 && strcmp(argv[0], "retrieve") == 0) {
+    *rv = action_retrieve_messages(&s, argc, argv);
+    return TRUE;
   }
 
   /* Option #2:
    *   Delete messages specified in `argv` (or all messages). */
 
-  if (argc > 0 && strcmp(argp[0], "delete") == 0) {
-    rv = action_delete_messages(&s, argc, argp);
-    return true;
+  if (argc > 0 && strcmp(argv[0], "delete") == 0) {
+    *rv = action_delete_messages(&s, argc, argv);
+    return TRUE;
   }
 
   /* Option #3:
    *   Send one or more messages, each to a single recipient. */
 
-  if (argc > 0 && strcmp(argp[0], "send") == 0) {
-    rv = action_send_messages(&s, argc, argp);
-    return true;
+  if (argc > 0 && strcmp(argv[0], "send") == 0) {
+    *rv = action_send_messages(&s, argc, argv);
+    return TRUE;
   }
 
-  return false;
+  return FALSE;
 }
 
 /**
@@ -1579,7 +1580,7 @@ int main(int argc, char *argv[]) {
   /* Execute action:
    *   This runs the operation provided via command-line arguments. */
 
-  if (process_action(argc, argv)) {
+  if (process_action(s, argc, argv, &rv)) {
     goto cleanup;
   }
 
