@@ -236,6 +236,18 @@ typedef enum {
 } delete_stage_t;
 
 /**
+ * @name delete_stage_t
+ */
+typedef struct parsed_json {
+
+  jsmn_parser parser;
+  jsmntok_t *tokens;
+  unsigned int nr_tokens;
+
+} parsed_json_t;
+
+
+/**
  * @name delete_callback_fn_t
  */
 typedef void (*delete_callback_fn_t)(
@@ -245,6 +257,92 @@ typedef void (*delete_callback_fn_t)(
 /** --- **/
 
 static app_options_t app; /* global */
+
+/** --- **/
+
+#define json_parser_tokens_start     (1)
+#define json_parser_tokens_maximum   (32768)
+
+/**
+ * @name parse_json:
+ */
+parsed_json_t *parse_json(char *json) {
+
+  parsed_json_t *rv =
+    (parsed_json_t *) malloc(sizeof(parsed_json_t));
+
+  if (!rv) {
+    return NULL;
+  }
+
+  rv->tokens = NULL;
+  rv->nr_tokens = 0;
+
+  unsigned int n = json_parser_tokens_start;
+
+  for (;;) {
+
+    /* Check against upper limit */
+    if (n > json_parser_tokens_maximum) {
+      goto allocation_error;
+    }
+
+    /* Paranoia: check for overflow */
+    if (((size_t) -1 / sizeof(jsmntok_t)) < n) {
+      return NULL;
+    }
+
+    jsmn_init(&rv->parser);
+    rv->tokens = realloc(rv->tokens, n * sizeof(jsmntok_t));
+
+    if (!rv->tokens) {
+      goto allocation_error;
+    }
+
+    jsmnerr_t result =
+      jsmn_parse(&rv->parser, json, rv->tokens, n);
+
+    /* Not enough room to parse the full string?
+     *   Increase the available token space by a couple (base two)
+     *   orders of magnitude, then go around, reallocate, and retry. */
+
+    if (result == JSMN_ERROR_NOMEM) {
+      n *= 4;
+      continue;
+    }
+
+    if (result < 0) {
+      goto allocation_error;
+    }
+
+    break;
+  }
+
+  /* Success */
+  rv->nr_tokens = n;
+  return rv;
+
+  /* Error:
+   *  Clean up the `rv` structure and its members. */
+
+  allocation_error:
+
+    if (rv->tokens) {
+      free(rv->tokens);
+    }
+
+    free(rv);
+    return NULL;
+}
+
+/**
+ * @name release_parsed_json:
+ */
+void release_parsed_json(parsed_json_t *p) {
+
+  free(p->tokens);
+  free(p);
+}
 
 /** --- **/
 
@@ -1590,7 +1688,22 @@ boolean_t process_repl_commands(FILE *stream) {
       break;
     }
 
-    free(line);
+    parsed_json_t *p = parse_json(line);
+
+    if (!p) {
+
+      printf("{");
+      printf("\"result\": \"error\",");
+      printf("\"error\": \"Parse error\", \"errno\": 1");
+      printf("}\n");
+
+      goto parse_error;
+    }
+
+    release_parsed_json(p);
+
+    parse_error:
+      free(line);
   }
 
   return TRUE;
