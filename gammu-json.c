@@ -1,3 +1,36 @@
+/**
+ * gammu-json
+ *
+ * Copyright 2012-2013 David Brown <dave@scri.pt>
+ * All rights reserved.
+ *
+ * This is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License, version three,
+ * as published by the Free Software Foundation.
+ *
+ * You should have received a copy of version three of the GNU General
+ * Public License along with this software. If you did not, see
+ * http://www.gnu.org/licenses/.
+ *
+ * This software is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL DAVID BROWN OR
+ * MEDIC MOBILE BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#define _GNU_SOURCE
 
 #include <errno.h>
 #include <stdio.h>
@@ -211,6 +244,10 @@ typedef void (*delete_callback_fn_t)(
 
 /** --- **/
 
+static app_options_t app; /* global */
+
+/** --- **/
+
 /**
  * @name initialize_transmit_status:
  */
@@ -266,11 +303,6 @@ app_options_t *initialize_application_options(app_options_t *o) {
   return o;
 }
 
-/** --- **/
-
-static app_options_t app; /* global */
-
-/** --- **/
 
 /**
  * @name malloc_and_zero
@@ -1125,8 +1157,6 @@ boolean_t delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
   return rv;
 }
 
-/** --- **/
-
 /**
  * @name action_delete_messages:
  */
@@ -1456,6 +1486,8 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     return rv;
 }
 
+/** --- **/
+
 /**
  * @name parse_global_arguments:
  */
@@ -1504,8 +1536,8 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
 }
 
 /**
- * @name process_action:
- *   Execute an action, based upon the arguments provided.
+ * @name process_command:
+ *   Execute a command, based upon the arguments provided.
  *   The `argv[0]` argument should contain a single command
  *   (currently either `send`, `retrieve`, or `delete`); the
  *   remaining items in `argv` are parameters to be provided to
@@ -1513,7 +1545,7 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
  *   executed (whether successfully or resulting in an error),
  *   or `false` if the command specified was not found.
  */
-boolean_t process_action(gammu_state_t *s,
+boolean_t process_command(gammu_state_t *s,
 			 int argc, char *argv[], int *rv) {
 
   /* Option #1:
@@ -1541,6 +1573,27 @@ boolean_t process_action(gammu_state_t *s,
   }
 
   return FALSE;
+}
+
+/**
+ * @name process_repl_commands:
+ */
+boolean_t process_repl_commands(FILE *stream) {
+
+  for (;;) {
+
+    ssize_t n = 0
+    char *line = NULL;
+    ssize_t rv = getline(&line, &n, stream);
+
+    if (rv < 0) {
+      break;
+    }
+
+    free(line);
+  }
+
+  return true;
 }
 
 /**
@@ -1577,18 +1630,21 @@ int main(int argc, char *argv[]) {
     goto cleanup;
   }
 
-  /* Execute action:
+  /* Execute command:
    *   This runs the operation provided via command-line arguments. */
 
-  if (process_action(s, argc, argv, &rv)) {
+  if (!process_command(s, argc, argv, &rv)) {
+    print_usage_error("invalid command specified");
     goto cleanup;
   }
 
-  /* No valid action specified:
-   *  Display message and usage information. */
+  /* Read, execute, print loop:
+   *  Repeatedly read lines of JSON from standard input, parse
+   *  them in to command/arguments tuples, dispatch these tuples
+   *  to `process_command`, and repeat until reaching end-of-file. */
 
-  if (!app.repl) {
-    print_usage_error("invalid action specified");
+  if (app.repl) {
+    process_repl_commands(stdin);
   }
 
   cleanup:
