@@ -1582,7 +1582,7 @@ boolean_t process_repl_commands(FILE *stream) {
 
   for (;;) {
 
-    ssize_t n = 0
+    size_t n = 0;
     char *line = NULL;
     ssize_t rv = getline(&line, &n, stream);
 
@@ -1593,7 +1593,7 @@ boolean_t process_repl_commands(FILE *stream) {
     free(line);
   }
 
-  return true;
+  return TRUE;
 }
 
 /**
