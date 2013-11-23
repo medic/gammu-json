@@ -1506,7 +1506,7 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
     if (strcmp(*argp, "-c") == 0 || strcmp(*argp, "--config") == 0) {
 
       if (*++argp == NULL) {
-	print_usage_error("no configuration file name provided");
+        print_usage_error("no configuration file name provided");
         o->invalid = TRUE;
         break;
       }
@@ -1546,7 +1546,7 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
  *   or `false` if the command specified was not found.
  */
 boolean_t process_command(gammu_state_t *s,
-			 int argc, char *argv[], int *rv) {
+                          int argc, char *argv[], int *rv) {
 
   /* Option #1:
    *   Retrieve all messages as a JSON array. */
@@ -1625,16 +1625,16 @@ int main(int argc, char *argv[]) {
   argc -= n;
   argp += n;
 
-  if (argc <= 0 && !app.repl) {
-    print_usage_error("no command specified");
-    goto cleanup;
-  }
-
   /* Execute command:
    *   This runs the operation provided via command-line arguments. */
 
-  if (!process_command(s, argc, argv, &rv)) {
-    print_usage_error("invalid command specified");
+  if (argc > 0) {
+    if (!process_command(s, argc, argp, &rv)) {
+      print_usage_error("invalid command specified");
+      goto cleanup;
+    }
+  } else if (!app.repl) {
+    print_usage_error("no command specified");
     goto cleanup;
   }
 
@@ -1643,7 +1643,7 @@ int main(int argc, char *argv[]) {
    *  them in to command/arguments tuples, dispatch these tuples
    *  to `process_command`, and repeat until reaching end-of-file. */
 
-  if (app.repl) {
+  if (app.repl && rv == 0) {
     process_repl_commands(stdin);
   }
 
