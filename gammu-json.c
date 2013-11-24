@@ -264,7 +264,7 @@ static app_options_t app; /* global */
 
 /** --- **/
 
-int multiplication_will_overflow(size_t n, size_t s) {
+inline int multiplication_will_overflow(size_t n, size_t s) {
 
   return (((size_t) -1 / s) < n);
 }
