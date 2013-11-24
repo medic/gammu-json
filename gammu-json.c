@@ -264,7 +264,7 @@ static app_options_t app; /* global */
 
 /** --- **/
 
-inline int multiplication_will_overflow(size_t n, size_t s) {
+int multiplication_will_overflow(size_t n, size_t s) {
 
   return (((size_t) -1 / s) < n);
 }
@@ -283,6 +283,56 @@ static void *malloc_and_zero(int size) {
 
   memset(rv, '\0', size);
   return rv;
+}
+
+#define line_size_start    (1024)
+#define line_size_maximum  (4194304)
+
+/**
+ * @name read_line:
+ *   Read a line portably, relying only upon the C library's
+ *   `getc` standard I/O function. This should work on any
+ *   platform that has a standard I/O (stdio)  implementation.
+ */
+char *read_line(FILE *stream, boolean_t *eof) {
+
+  int c;
+  char *rv = NULL;
+  unsigned int i = 0;
+  unsigned int size = 0;
+
+  for (;;) {
+
+    if (!size || i >= size) {
+      size = (size ? size * 8 : line_size_start);
+
+      if (!(rv = (char *) realloc(rv, size + 1))) {
+        goto allocation_error;
+      }
+    }
+
+    c = getc(stream);
+
+    if (c == '\n') {
+      break;
+    } else if (c == EOF) {
+      *eof = TRUE;
+      break;
+    }
+
+    rv[i++] = c;
+  }
+
+  rv[i] = '\0';
+  return rv;
+
+  allocation_error:
+
+    if (rv) {
+      free(rv);
+    }
+
+    return NULL;
 }
 
 /* --- */
@@ -370,7 +420,7 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
     if (!size || n >= size) {
 
       /* Increase size by a few orders of magnitude */
-      size = (size ? size * 4 : json_argument_list_start);
+      size = (size ? size * 8 : json_argument_list_start);
 
       /* Increase size, then check against memory limit */
       if (size > json_argument_list_maximum) {
@@ -383,9 +433,7 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
       }
 
       /* Enlarge array of argument pointers */
-      rv = (char **) realloc(rv, size * sizeof(char *));
-
-      if (!rv) {
+      if (!(rv = (char **) realloc(rv, size * sizeof(char *)))) {
         return_validation_error(3);
       }
     }
@@ -594,9 +642,8 @@ parsed_json_t *parse_json(char *json) {
     }
 
     jsmn_init(&rv->parser);
-    rv->tokens = realloc(rv->tokens, n * sizeof(jsmntok_t));
 
-    if (!rv->tokens) {
+    if (!(rv->tokens = realloc(rv->tokens, n * sizeof(jsmntok_t)))) {
       goto allocation_error;
     }
 
@@ -1990,30 +2037,29 @@ boolean_t process_repl_commands(FILE *stream) {
 
   for (;;) {
 
-    size_t n = 0;
-    char *line = NULL;
-    ssize_t rv = getline(&line, &n, stream);
+    boolean_t is_eof = FALSE;
+    char *line = read_line(stream, &is_eof);
 
-    if (rv < 0) {
+    if (!line) {
       break;
     }
 
     parsed_json_t *p = parse_json(line);
 
-    if (!p) {
-
+    if (p) {
+      release_parsed_json(p);
+    } else {
       printf("{");
       printf("\"result\": \"error\",");
       printf("\"error\": \"Parse error\", \"errno\": 1");
       printf("}\n");
-
-      goto parse_error;
     }
 
-    release_parsed_json(p);
+    free(line);
 
-    parse_error:
-      free(line);
+    if (is_eof) {
+      break;
+    }
   }
 
   return TRUE;
