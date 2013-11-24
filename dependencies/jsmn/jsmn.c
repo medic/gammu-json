@@ -21,8 +21,21 @@
  */
 
 #include <stdlib.h>
-#include <stdio.h>
 #include "jsmn.h"
+
+/**
+ * Mark a token as invalid. This can be used prior to parsing, in
+ * order to easily detect tokens that were not filled by jsmn_parse.
+ */
+void jsmn_mark_token_invalid(jsmntok_t *t) {
+
+    t->start = t->end = -1;
+	t->size = 0;
+
+    #ifdef JSMN_PARENT_LINKS
+	    t->parent = -1;
+    #endif
+}
 
 /**
  * Allocates a fresh unused token from the token pool.
@@ -34,11 +47,7 @@ static jsmntok_t *jsmn_alloc_token(jsmn_parser *parser,
 		return NULL;
 	}
 	tok = &tokens[parser->toknext++];
-	tok->start = tok->end = -1;
-	tok->size = 0;
-#ifdef JSMN_PARENT_LINKS
-	tok->parent = -1;
-#endif
+    jsmn_mark_token_invalid(tok);
 	return tok;
 }
 
@@ -273,5 +282,24 @@ void jsmn_init(jsmn_parser *parser) {
 	parser->pos = 0;
 	parser->toknext = 0;
 	parser->toksuper = -1;
+}
+
+/**
+ * Translate a jsmn token in to a null-terminated string. Returns a pointer to
+ * a null-terminated string that *overlaps* the original JSON string. It is not
+ * necessary to free the returned value; pointers returned from this function
+ * will be invalidated when the original JSON string is freed. This function is
+ * destructive, in that it modifies the original JSON string rendering it
+ * unparsable in the future. If there is no string data associated with the
+ * token you provide, this function returns NULL and has no side-effects.
+ */
+char *jsmn_stringify_token(char *json, jsmntok_t *token) {
+
+	if (token->type != JSMN_PRIMITIVE && token->type != JSMN_STRING) {
+		return NULL;
+	}
+
+	json[token->end] = '\0';
+	return &json[token->start];
 }
 

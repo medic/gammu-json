@@ -31,8 +31,8 @@
  *   sized definitions of jsmntok_t in different locations, leading
  *   to buffer overruns on the heap and a glibc call to abort(). */
 
-#define JSMN_STRICT
-#define JSMN_PARENT_LINKS
+#define JSMN_STRICT         (1)
+#define JSMN_PARENT_LINKS   (1)
 
 /**
  * JSON type identifier. Basic types are:
@@ -96,6 +96,18 @@ void jsmn_init(jsmn_parser *parser);
  */
 jsmnerr_t jsmn_parse(jsmn_parser *parser, const char *js, 
 		jsmntok_t *tokens, unsigned int num_tokens);
+
+/**
+ * Mark a token as invalid. This can be used prior to parsing, in
+ * order to easily detect tokens that were not filled by jsmn_parse.
+ */
+void jsmn_mark_token_invalid(jsmntok_t *token);
+
+/**
+ * Destructively translate a jsmn token in to a null-terminated string.
+ * See jsmn.c for a full description.
+ */
+char *jsmn_stringify_token(char *json, jsmntok_t *token);
 
 #endif /* __JSMN_H__ */
 

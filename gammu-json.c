@@ -1,7 +1,9 @@
 /**
  * gammu-json
  *
- * Copyright 2012-2013 David Brown <dave@scri.pt>
+ * Copyright (c) 2013 David Brown <hello at scri.pt>.
+ * Copyright (c) 2013 Medic Mobile, Inc. <david at medicmobile.org>
+ *
  * All rights reserved.
  *
  * This is free software: you can redistribute it and/or modify it
@@ -63,8 +65,8 @@ const static char *usage_text = (
   "                            print its result as a single line of JSON\n"
   "                            on stdout. Repeat this until end-of-file is\n"
   "                            reached on stdin. If a command is provided\n"
-  "			       via command-line arguments, execute it before\n"
-  "			       attempting to read more commands from stdin.\n"
+  "                            via command-line arguments, execute it before\n"
+  "                            attempting to read more commands from stdin.\n"
   "\n"
   "  -v, --verbose             Ask Gammu to print debugging information\n"
   "                            to stderr while performing operations.\n"
@@ -240,6 +242,7 @@ typedef enum {
  */
 typedef struct parsed_json {
 
+  char *json;
   jsmn_parser parser;
   jsmntok_t *tokens;
   unsigned int nr_tokens;
@@ -264,6 +267,43 @@ static app_options_t app; /* global */
 #define json_parser_tokens_maximum   (32768)
 
 /**
+ * @name print_parsed_json:
+ */
+void print_parsed_json(parsed_json_t *p) {
+
+  fprintf(stderr, "start\n");
+
+  for (unsigned int i = 0; i < p->nr_tokens; ++i) {
+
+    jsmntok_t *t = &p->tokens[i];
+    char *s = jsmn_stringify_token(p->json, t);
+
+    if (t->start == -1 || t->end == -1) {
+      fprintf(stderr, "end\n");
+      break;
+    }
+
+    switch (t->type) {
+      case JSMN_STRING:
+        fprintf(stderr, "string: '%s'\n", s);
+        break;
+      case JSMN_PRIMITIVE:
+        fprintf(stderr, "primitive: '%s'\n", s);
+        break;
+      case JSMN_OBJECT:
+        fprintf(stderr, "object[%d]\n", t->size);
+        break;
+      case JSMN_ARRAY:
+        fprintf(stderr, "array[%d]\n", t->size);
+        break;
+      default:
+        fprintf(stderr, "unknown-%d[%d]: '%s'\n", t->type, t->size, s);
+        continue;
+    }
+  }
+}
+
+/**
  * @name parse_json:
  */
 parsed_json_t *parse_json(char *json) {
@@ -275,6 +315,7 @@ parsed_json_t *parse_json(char *json) {
     return NULL;
   }
 
+  rv->json = json;
   rv->tokens = NULL;
   rv->nr_tokens = 0;
 
@@ -299,6 +340,12 @@ parsed_json_t *parse_json(char *json) {
       goto allocation_error;
     }
 
+    /* Set all tokens to invalid */
+    for (unsigned int i = 0; i < n; ++i) {
+      jsmn_mark_token_invalid(&rv->tokens[i]);
+    }
+
+    /* Parse */
     jsmnerr_t result =
       jsmn_parse(&rv->parser, json, rv->tokens, n);
 
@@ -315,11 +362,14 @@ parsed_json_t *parse_json(char *json) {
       goto allocation_error;
     }
 
+    /* Parsed successfully */
+    rv->nr_tokens = n;
+    print_parsed_json(rv);
+
     break;
   }
 
   /* Success */
-  rv->nr_tokens = n;
   return rv;
 
   /* Error:
@@ -359,7 +409,7 @@ transmit_status_t *initialize_transmit_status(transmit_status_t *t) {
   t->message_index = 0;
   t->message_part_index = 0;
 
-  for (int i = 0; i < GSM_MAX_MULTI_SMS; i++) {
+  for (unsigned int i = 0; i < GSM_MAX_MULTI_SMS; i++) {
     t->parts[i].err = NULL;
     t->parts[i].status = 0;
     t->parts[i].reference = 0;
@@ -563,7 +613,7 @@ boolean_t find_maximum_integer_argument(unsigned long *rv, char *argv[]) {
   unsigned long max = 0;
   boolean_t found = FALSE;
 
-  for (int i = 0; argv[i] != NULL; i++) {
+  for (unsigned int i = 0; argv[i] != NULL; i++) {
 
     char *err = NULL;
     unsigned long n = strtoul(argv[i], &err, 10);
@@ -587,7 +637,7 @@ boolean_t find_maximum_integer_argument(unsigned long *rv, char *argv[]) {
  */
 boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
 
-  for (int i = 0; argv[i] != NULL; i++) {
+  for (unsigned int i = 0; argv[i] != NULL; i++) {
 
     char *err = NULL;
     unsigned long n = strtoul(argv[i], &err, 10);
@@ -614,7 +664,7 @@ boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
  */
 char *ucs2_encode_json_utf8(const unsigned char *s) {
 
-  int i, j = 0;
+  unsigned int i, j = 0;
   int ul = UnicodeLength(s);
 
   /* Worst-case UCS-2 string allocation:
@@ -768,7 +818,7 @@ boolean_t ucs2_is_gsm_string(const unsigned char *s) {
 
   int ul = UnicodeLength(s);
 
-  for (int i = 0; i < ul; ++i) {
+  for (unsigned int i = 0; i < ul; ++i) {
     if (!ucs2_is_gsm_codepoint(s[2 * i], s[2 * i + 1])) {
       return FALSE;
     }
@@ -926,7 +976,7 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     printf(", ");
   }
 
-  for (int i = 0; i < sms->Number; i++) {
+  for (unsigned int i = 0; i < sms->Number; i++) {
 
     printf("{");
 
@@ -1160,7 +1210,7 @@ boolean_t delete_multimessage(gammu_state_t *s,
                               delete_callback_fn_t callback, void *x) {
   int rv = TRUE;
 
-  for (int i = 0; i < sms->Number; i++) {
+  for (unsigned int i = 0; i < sms->Number; i++) {
 
     message_t *m = &sms->SMS[i];
 
@@ -1363,7 +1413,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
     printf("\"parts\": [");
 
     /* Per-part information */
-    for (int i = 0; i < t->parts_total; i++) {
+    for (unsigned int i = 0; i < t->parts_total; i++) {
 
       if (i != 0) {
         printf(", ");
@@ -1529,7 +1579,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     status.parts_total = sms->Number;
 
     /* For each SMS part... */
-    for (int i = 0; i < sms->Number; i++) {
+    for (unsigned int i = 0; i < sms->Number; i++) {
 
       status.finished = FALSE;
       status.message_part_index = i;
