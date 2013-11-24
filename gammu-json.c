@@ -535,12 +535,13 @@ void print_parsed_json(parsed_json_t *p) {
   for (unsigned int i = 0; i < p->nr_tokens; ++i) {
 
     jsmntok_t *t = &p->tokens[i];
-    char *s = jsmn_stringify_token(p->json, t);
 
-    if (t->start == -1 || t->end == -1) {
+    if (jsmn_token_is_invalid(t)) {
       fprintf(stderr, "end\n");
       break;
     }
+    
+    char *s = jsmn_stringify_token(p->json, t);
 
     switch (t->type) {
       case JSMN_STRING:
