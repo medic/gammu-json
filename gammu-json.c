@@ -300,7 +300,7 @@ typedef enum {
 /**
  * @name json_validation_errors:
  */
-char *json_validation_errors[] = {
+const char *const json_validation_errors[] = {
   /* 0 */  "success; no error",
   /* 1 */  "parser memory limit exceeded",
   /* 2 */  "internal error: memory allocation failure",
@@ -312,9 +312,23 @@ char *json_validation_errors[] = {
   /* 8 */  "value for `arguments` property must be an array",
   /* 9 */  "arguments must be either strings or numeric values",
   /* 10 */ "non-string values in `arguments` must be numeric",
-  /* 11 */ "unknown or unhandled error",
-  /* 12 */ "one or more required properties are missing"
+  /* 11 */ "one or more required properties are missing",
+  /* 12 */ "unknown or unhandled error"
 };
+
+/**
+ * @name json_validation_error_to_string:
+ */
+const char *json_validation_error_to_string(int err) {
+
+  if (err >= 0 && err < sizeof(json_validation_errors)) {
+    return json_validation_errors[err];
+  } else {
+    return json_validation_errors[
+      (sizeof(json_validation_errors) / sizeof(const char *)) - 1
+    ];
+  }
+}
 
 /**
  * @name parsed_json_to_arguments:
@@ -470,14 +484,14 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
       }
 
       default: {
-        return_validation_error(11);
+        return_validation_error(12);
         break;
       }
     }
   }
 
   if (state != SUCCESS) {
-    return_validation_error(12);
+    return_validation_error(11);
   }
 
   /* Victory */
@@ -487,8 +501,8 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
     rv[n + 2] = NULL;
 
     /* Return values */
-    *argc = n;
     *argv = rv;
+    *argc = n + 1;
 
     /* Success */
     return TRUE;
@@ -611,8 +625,18 @@ parsed_json_t *parse_json(char *json) {
     char **argv = NULL;
     int argc = 0, err = 0;
 
-    parsed_json_to_arguments(rv, &argc, &argv, &err);
-    printf("err: %d\n", err);
+    boolean_t r = parsed_json_to_arguments(rv, &argc, &argv, &err);
+
+    printf("result: %s\n", (r ? "true" : "false"));
+    printf("error status: %s\n", json_validation_error_to_string(err));
+
+    printf("yield: ");
+
+    for (int i = 0; i < argc; ++i) {
+      printf("'%s' ", argv[i]);
+    }
+
+    printf("\n");
     free(argv);
 
     break;
