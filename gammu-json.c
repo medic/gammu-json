@@ -340,9 +340,10 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
   char **rv = NULL;
 
   unsigned int size = 0;
-  unsigned int object_size = 0;
   jsmntok_t *tokens = p->tokens;
   json_validation_state_t state = START;
+  boolean_t matched_keys[] = { FALSE, FALSE };
+  unsigned int object_size = 0, array_size = 0;
 
   #define return_validation_error(e) \
     do { *err = (e); goto validation_error; } while (0)
@@ -357,7 +358,12 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
 
     jsmntok_t *t = &tokens[i];
 
-    if (state == SUCCESS || jsmn_token_is_invalid(t)) {
+    if (matched_keys[0] && matched_keys[1]) {
+      state = SUCCESS;
+      break;
+    }
+
+    if (jsmn_token_is_invalid(t)) {
       break;
     }
 
@@ -425,9 +431,7 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
           }
 
           rv[0] = jsmn_stringify_token(p->json, t);
-
-          /* To walk the stair... */
-          object_size -= 2;
+          matched_keys[0] = TRUE;
 
         } else if (strcmp(s, "arguments") == 0) {
 
@@ -435,25 +439,23 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
             return_validation_error(8);
           }
 
-          object_size = t->size;
-          state = IN_ARGUMENTS_ARRAY;
-
           /* Handle empty arrays */
           jsmntok_t *tt = token_lookahead(i, 2);
 
-          if (!tt || object_size <= 0) {
-            state = SUCCESS;
-            break;
+          if (!tt || t->size <= 0) {
+            matched_keys[1] = TRUE;
+          } else {
+            state = IN_ARGUMENTS_ARRAY;
           }
 
-        } else {
-
-          /* Skip unknown key/value pair */
-          object_size -= 2;
+          /* Enter array */
+          array_size = t->size;
         }
 
-        /* ...steps in pairs */
+        /* To walk the stair / steps in pairs */
+        object_size -= 2;
         i++;
+
         break;
       }
 
@@ -472,8 +474,9 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
 
         rv[++n] = s;
 
-        if (--object_size <= 0) {
-          state = SUCCESS;
+        if (--array_size <= 0) {
+          matched_keys[1] = TRUE;
+          state = IN_ROOT_OBJECT;
         }
 
         break;
