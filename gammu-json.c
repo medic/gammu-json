@@ -265,7 +265,7 @@ static app_options_t app; /* global */
 
 int multiplication_will_overflow(size_t n, size_t s) {
 
-  return (((size_t) -1 / s) >= n);
+  return (((size_t) -1 / s) < n);
 }
 
 /** --- **/
@@ -417,7 +417,7 @@ char *json_validation_errors[] = {
   /* 3 */  "internal error: integer value would overflow",
   /* 4 */  "root entity must be an object",
   /* 5 */  "property names must be strings",
-  /* 6 */  "object contains a partial key/value pair",
+  /* 6 */  "object contains one or more incomplete key/value pairs",
   /* 7 */  "value for `command` property must be a string",
   /* 8 */  "value for `arguments` property must be an array",
   /* 9 */  "arguments must be either strings or numeric values",
