@@ -260,7 +260,7 @@ static app_options_t app; /* global */
 
 /** --- **/
 
-#define json_parser_tokens_start     (1)
+#define json_parser_tokens_start     (32)
 #define json_parser_tokens_maximum   (32768)
 
 /**

@@ -23,6 +23,17 @@
 #ifndef __JSMN_H__
 #define __JSMN_H__
 
+/* Feature definitions:
+ *   We don't include these in $CFLAGS, as anyone including jsmn.h
+ *   and linking adainst libjsmn.h would also have to define them
+ *   identically.  Failure to define these macros in the same way
+ *   for all code that includes jsmn.h would lead to differently
+ *   sized definitions of jsmntok_t in different locations, leading
+ *   to buffer overruns on the heap and a glibc call to abort(). */
+
+#define JSMN_STRICT
+#define JSMN_PARENT_LINKS
+
 /**
  * JSON type identifier. Basic types are:
  * 	o Object

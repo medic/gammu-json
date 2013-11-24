@@ -1,6 +1,4 @@
 
-CFLAGS += -DJSMN_STRICT -DJSMN_PARENT_LINKS
-
 all: libjsmn.a test
 
 libjsmn.a: jsmn.o
