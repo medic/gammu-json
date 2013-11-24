@@ -39,6 +39,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <limits.h>
+#include <ctype.h>
 #include <inttypes.h>
 
 #include <gammu.h>
@@ -289,10 +290,16 @@ static void *malloc_and_zero(int size) {
 #define json_argument_list_start    (128)
 #define json_argument_list_maximum  (524288)
 
+/**
+ * @name json_validation_state_t:
+ */
 typedef enum {
   START = 0, IN_ROOT_OBJECT, IN_ARGUMENTS_ARRAY, SUCCESS
 } json_validation_state_t;
 
+/**
+ * @name json_validation_errors:
+ */
 char *json_validation_errors[] = {
   /* 0 */  "success; no error",
   /* 1 */  "parser memory limit exceeded",
@@ -312,7 +319,6 @@ char *json_validation_errors[] = {
 /**
  * @name parsed_json_to_arguments:
  */
-
 boolean_t parsed_json_to_arguments(parsed_json_t *p,
                                    int *argc, char **argv[], int *err) {
 
@@ -411,7 +417,7 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
 
         } else if (strcmp(s, "arguments") == 0) {
 
-          if (t->type != JSMN_ARRAY) {
+          if (t->type != JSMN_ARRAY && t->type != JSMN_OBJECT) {
             return_validation_error(8);
           }
 
@@ -446,7 +452,7 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
         char *s = jsmn_stringify_token(p->json, t);
 
         /* Require that primitives are numeric */
-        if (t->type == JSMN_PRIMITIVE && (!s || s[0] < '0' || s[0] > '9')) {
+        if (t->type == JSMN_PRIMITIVE && (!s || !isdigit(s[0]))) {
           return_validation_error(10);
         }
 
@@ -476,6 +482,7 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
 
   /* Victory */
   successful:
+
     /* Null-terminate */
     rv[n + 2] = NULL;
 
