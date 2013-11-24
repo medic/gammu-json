@@ -348,6 +348,50 @@ int test_objects_arrays() {
     return 0;
 }
 
+int test_unicode_characters() {
+    jsmn_parser p;
+    jsmntok_t tokens[10];
+    const char *js;
+
+    int r;
+    js = "{\"a\":\"\\uAbcD\"}";
+    jsmn_init(&p);
+    r = jsmn_parse(&p, js, tokens, 10);
+    check(r == JSMN_SUCCESS);
+
+    js = "{\"a\":\"str\\u0000\"}";
+    jsmn_init(&p);
+    r = jsmn_parse(&p, js, tokens, 10);
+    check(r == JSMN_SUCCESS);
+
+    js = "{\"a\":\"\\uFFFFstr\"}";
+    jsmn_init(&p);
+    r = jsmn_parse(&p, js, tokens, 10);
+    check(r == JSMN_SUCCESS);
+
+    js = "{\"a\":\"str\\uFFGFstr\"}";
+    jsmn_init(&p);
+    r = jsmn_parse(&p, js, tokens, 10);
+    check(r == JSMN_ERROR_INVAL);
+
+    js = "{\"a\":\"str\\u@FfF\"}";
+    jsmn_init(&p);
+    r = jsmn_parse(&p, js, tokens, 10);
+    check(r == JSMN_ERROR_INVAL);
+
+    js = "{\"a\":[\"\\u028\"]}";
+    jsmn_init(&p);
+    r = jsmn_parse(&p, js, tokens, 10);
+    check(r == JSMN_ERROR_INVAL);
+
+    js = "{\"a\":[\"\\u0280\"]}";
+    jsmn_init(&p);
+    r = jsmn_parse(&p, js, tokens, 10);
+    check(r == JSMN_SUCCESS);
+
+    return 0;
+}
+
 int main() {
     test(test_empty, "general test for a empty JSON objects/arrays");
     test(test_simple, "general test for a simple JSON string");
@@ -358,6 +402,7 @@ int main() {
     test(test_array_nomem, "test array reading with a smaller number of tokens");
     test(test_unquoted_keys, "test unquoted keys (like in JavaScript)");
     test(test_objects_arrays, "test objects and arrays");
+    test(test_unicode_characters, "test unicode characters");
 
     if (test_failed > 0) {
         printf("One or more tests failed (%d of %d)\n\n", test_passed, test_failed);
@@ -366,4 +411,6 @@ int main() {
 
     return 0;
 }
+
+/* vim: set ts=8 sts=4 sw=4 expandtab: */
 

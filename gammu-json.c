@@ -1248,8 +1248,8 @@ boolean_t delete_multimessage(gammu_state_t *s,
 /**
  * @name _after_deletion_callback:
  */
-void _after_deletion_callback(gammu_state_t *s,
-                              message_t *sms, delete_stage_t r, void *x) {
+static void _after_deletion_callback(gammu_state_t *s, message_t *sms,
+                                     delete_stage_t r, void *x) {
 
   delete_status_t *status = (delete_status_t *) x;
 
@@ -1265,9 +1265,9 @@ void _after_deletion_callback(gammu_state_t *s,
 /**
  * @name _before_deletion_callback:
  */
-boolean_t _before_deletion_callback(gammu_state_t *s,
-                                    multimessage_t *sms,
-                                    boolean_t is_start, void *x) {
+static boolean_t _before_deletion_callback(gammu_state_t *s,
+                                           multimessage_t *sms,
+                                           boolean_t is_start, void *x) {
 
   delete_status_t *status = (delete_status_t *) x;
 
@@ -1816,4 +1816,6 @@ int main(int argc, char *argv[]) {
     }
     return rv;
 }
+
+/* vim: set ts=4 sts=2 sw=2 expandtab: */
 

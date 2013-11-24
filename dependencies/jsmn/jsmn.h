@@ -70,9 +70,9 @@ typedef struct {
 	int start;
 	int end;
 	int size;
-#ifdef JSMN_PARENT_LINKS
-	int parent;
-#endif
+	#ifdef JSMN_PARENT_LINKS
+		int parent;
+	#endif
 } jsmntok_t;
 
 /**
@@ -110,4 +110,6 @@ void jsmn_mark_token_invalid(jsmntok_t *token);
 char *jsmn_stringify_token(char *json, jsmntok_t *token);
 
 #endif /* __JSMN_H__ */
+
+/* vim: set ts=4 sts=0 noexpandtab: */
 
