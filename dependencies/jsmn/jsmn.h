@@ -104,6 +104,12 @@ jsmnerr_t jsmn_parse(jsmn_parser *parser, const char *js,
 void jsmn_mark_token_invalid(jsmntok_t *token);
 
 /**
+ * Return a true value if the token supplied is in the "invalid"
+ * state; return false if the token contains any kind of parsed data.
+ */
+int jsmn_token_is_invalid(jsmntok_t *t);
+
+/**
  * Destructively translate a jsmn token in to a null-terminated string.
  * See jsmn.c for a full description.
  */

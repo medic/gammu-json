@@ -38,6 +38,15 @@ void jsmn_mark_token_invalid(jsmntok_t *t) {
 }
 
 /**
+ * Return a true value if the token supplied is in the "invalid"
+ * state; return false if the token contains any kind of parsed data.
+ */
+int jsmn_token_is_invalid(jsmntok_t *t) {
+
+	return (t->start == -1 || t->end == -1);
+}
+
+/**
  * Allocates a fresh unused token from the token pool.
  */
 static jsmntok_t *jsmn_alloc_token(jsmn_parser *parser, 
