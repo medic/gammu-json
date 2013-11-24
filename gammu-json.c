@@ -263,6 +263,13 @@ static app_options_t app; /* global */
 
 /** --- **/
 
+int multiplication_will_overflow(size_t n, size_t s) {
+
+  return (((size_t) -1 / s) >= n);
+}
+
+/** --- **/
+
 #define json_parser_tokens_start     (32)
 #define json_parser_tokens_maximum   (32768)
 
@@ -329,7 +336,7 @@ parsed_json_t *parse_json(char *json) {
     }
 
     /* Paranoia: check for overflow */
-    if (((size_t) -1 / sizeof(jsmntok_t)) < n) {
+    if (multiplication_will_overflow(n, sizeof(jsmntok_t))) {
       return NULL;
     }
 
@@ -392,6 +399,190 @@ void release_parsed_json(parsed_json_t *p) {
 
   free(p->tokens);
   free(p);
+}
+
+/* --- */
+
+#define json_argument_list_start      (128)
+#define json_argument_list_maximum   (524288)
+
+typedef enum {
+  START, IN_ROOT_OBJECT, IN_ARGUMENTS_ARRAY, SUCCESS
+} json_validation_state_t;
+
+char *json_validation_errors[] = {
+  /* 0 */  "success; no error",
+  /* 1 */  "parser memory limit exceeded",
+  /* 2 */  "internal error: memory allocation failure",
+  /* 3 */  "internal error: integer value would overflow",
+  /* 4 */  "root entity must be an object",
+  /* 5 */  "property names must be strings",
+  /* 6 */  "object contains a partial key/value pair",
+  /* 7 */  "value for `command` property must be a string",
+  /* 8 */  "value for `arguments` property must be an array",
+  /* 9 */  "arguments must be either strings or numeric values",
+  /* 10 */ "non-string arguments must be numeric",
+  /* 11 */ "unknown or unhandled error",
+  /* 12 */ "one or more required properties are missing"
+};
+
+/**
+ * @name parsed_json_to_arguments:
+ */
+
+boolean_t parsed_json_to_arguments(parsed_json_t *p,
+                                   int *argc, char **argv[], int *errno) {
+
+  int n = 0;
+  char **rv = NULL;
+
+  unsigned int object_size = 0;
+  jsmntok_t *tokens = p->tokens;
+  json_validation_state_t state = START;
+  unsigned int size = json_argument_list_start;
+
+  #define return_validation_error(e) \
+    do { *errno = (e); goto validation_error; } while (0)
+
+  #define token_lookahead(c) \
+    ((n + (c)) < p->nr_tokens && \
+     !jsmn_token_is_invalid(tokens + n + (c)) ? (tokens + n + (c)) : NULL)
+
+  /* For every token */
+  for (unsigned int i = 0; i < p->nr_tokens; ++i) {
+
+    jsmntok_t *t = &p->tokens[i];
+
+    if (jsmn_token_is_invalid(t)) {
+      break;
+    }
+
+    if (!n || n >= size) {
+
+      /* Increase size, then check against memory limit */
+      if ((size *= 8) > json_argument_list_maximum) {
+        return_validation_error(1);
+      }
+
+      /* Paranoia: check for overflow */
+      if (multiplication_will_overflow(size, sizeof(char *))) {
+        return_validation_error(2);
+      }
+
+      /* Enlarge array of argument pointers */
+      rv = (char **) realloc(rv, size * sizeof(char *));
+
+      if (!rv) {
+        return_validation_error(3);
+      }
+    }
+
+    switch (state) {
+
+      case START: {
+
+        if (t->type != JSMN_OBJECT) {
+          return_validation_error(4);
+        }
+
+        state = IN_ROOT_OBJECT;
+        object_size = t->size;
+        break;
+      }
+
+      case IN_ROOT_OBJECT: {
+
+        if (object_size <= 0) {
+          break;
+        }
+
+        if (t->type != JSMN_STRING) {
+          return_validation_error(5);
+        }
+
+        char *s = jsmn_stringify_token(p->json, t);
+
+        if (!(t = token_lookahead(1))) {
+          return_validation_error(6);
+        }
+        
+        if (strcmp(s, "command") == 0) {
+
+          if (t->type != JSMN_STRING) {
+            return_validation_error(7);
+          }
+
+          rv[0] = jsmn_stringify_token(p->json, t);
+
+        } else if (strcmp(s, "arguments") == 0) {
+
+          if (t->type != JSMN_ARRAY) {
+            return_validation_error(8);
+          }
+
+          state = IN_ARGUMENTS_ARRAY;
+          object_size = t->size;
+        }
+
+        /* To walk the stair / steps in pairs */
+        object_size -= 2;
+        i++;
+
+        break;
+      }
+
+      case IN_ARGUMENTS_ARRAY: {
+
+        if (t->type != JSMN_PRIMITIVE && t->type != JSMN_STRING) {
+          return_validation_error(9);
+        }
+
+        char *s = jsmn_stringify_token(p->json, t);
+
+        /* Require that primitives are numeric */
+        if (t->type == JSMN_PRIMITIVE && (!s || s[0] < '0' || s[0] > '9')) {
+          return_validation_error(10);
+        }
+
+        rv[++n] = s;
+
+        if (--object_size <= 0) {
+          state = SUCCESS;
+        }
+
+        break;
+      }
+
+      case SUCCESS: {
+        break;
+      }
+
+      default: {
+        return_validation_error(11);
+        break;
+      }
+    }
+  }
+
+  if (state != SUCCESS) {
+    return_validation_error(12);
+  }
+
+  /* Return values */
+  *argc = n;
+  *argv = rv;
+
+  /* Success */
+  return TRUE;
+
+  /* Error */
+  validation_error:
+
+    if (rv) {
+      free(rv);
+    }
+
+    return FALSE;
 }
 
 /** --- **/
