@@ -2122,7 +2122,7 @@ boolean_t process_command(gammu_state_t *s,
 /**
  * @name process_repl_commands:
  */
-boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
+void process_repl_commands(gammu_state_t *s, FILE *stream) {
 
   for (;;) {
 
@@ -2131,6 +2131,10 @@ boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
 
     if (!line) {
       break;
+    }
+
+    if (is_eof && line[0] == '\0') {
+      return;
     }
 
     parsed_json_t *p = parse_json(line);
@@ -2174,8 +2178,6 @@ boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
         break;
       }
   }
-
-  return TRUE;
 }
 
 /**
