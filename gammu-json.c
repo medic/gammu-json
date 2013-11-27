@@ -306,9 +306,9 @@ static const char *const usage_errors[] = {
 typedef enum {
   U_ERR_NONE = 0, U_ERR_ARGS_MISSING = 1,
     U_ERR_ARGS_ODD = 2, U_ERR_CONFIG_MISSING = 3,
-    U_ERR_ARGS_INVALID = 4, U_ERR_CMD_INVALID = 5,
+    U_ERR_ARGS_INVAL = 4, U_ERR_CMD_INVAL = 5,
     U_ERR_CMD_MISSING = 6, U_ERR_LOC_MISSING = 7,
-    U_ERR_LOC_INVALID = 8, U_ERR_OVERFLOW = 9, U_ERR_UNKNOWN = 10
+    U_ERR_LOC_INVAL = 8, U_ERR_OVERFLOW = 9, U_ERR_UNKNOWN = 10
 } usage_error_t;
 
 
@@ -403,7 +403,7 @@ static int usage() {
  */
 static void print_usage_error(usage_error_t err) {
 
-  char *s = (
+  const char *s = (
     err < U_ERR_UNKNOWN ?
       usage_errors[err] : "unknown or unhandled error"
   );
@@ -417,7 +417,7 @@ static void print_usage_error(usage_error_t err) {
  */
 static void print_operation_error(operation_error_t err) {
 
-  char *s = (
+  const char *s = (
     err < OP_ERR_UNKNOWN ?
       operation_errors[err] : "unknown or unhandled error"
   );
@@ -427,19 +427,6 @@ static void print_operation_error(operation_error_t err) {
   fprintf(stderr, "Check Gammu's configuration if difficulties persist.\n");
 }
 
-/**
- * @name print_validation_error:
- */
-static void print_operation_error(validation_error_t err) {
-
-  char *s = (
-    err < V_ERR_UNKNOWN ?
-      operation_errors[err] : "unknown or unhandled error"
-  );
-
-  fprintf(stderr, "Error: %s.\n", s);
-  fprintf(stderr, "Failure while validating JSON.\n");
-}
 /* --- */
 
 #define json_argument_list_start    (128)
@@ -481,21 +468,21 @@ typedef enum {
     V_ERR_PROPS_TYPE = 6, V_ERR_PROPS_ODD = 7,
     V_ERR_CMD_TYPE = 8, V_ERR_ARGS_TYPE = 9,
     V_ERR_ARG_TYPE = 10, V_ERR_ARGS_NUMERIC = 11,
-    V_ERROR_PROPS_MISSING = 12, V_ERR_END = 13
+    V_ERR_PROPS_MISSING = 12, V_ERR_UNKNOWN = 13
 } validation_error_t;
 
 /**
- * @name json_validation_error_to_string:
+ * @name print_json_validation_error:
  */
-const char *json_validation_error_to_string(int err) {
+static void print_json_validation_error(validation_error_t err) {
 
-  if (err >= 0 && err < sizeof(json_validation_errors)) {
-    return json_validation_errors[err];
-  } else {
-    return json_validation_errors[
-      (sizeof(json_validation_errors) / sizeof(const char *)) - 1
-    ];
-  }
+  const char *s = (
+    err < V_ERR_UNKNOWN ?
+      json_validation_errors[err] : "unknown or unhandled error"
+  );
+
+  fprintf(stderr, "Error: %s.\n", s);
+  fprintf(stderr, "Failure while parsing/validating JSON.\n");
 }
 
 /**
@@ -1705,7 +1692,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     boolean_t found = find_maximum_integer_argument(&n, &argv[1]);
 
     if (!found) {
-      print_usage_error(U_ERR_LOC_INVALID);
+      print_usage_error(U_ERR_LOC_INVAL);
       rv = 2; goto cleanup;
     }
 
@@ -2075,6 +2062,8 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
 boolean_t process_command(gammu_state_t *s,
                           int argc, char *argv[], int *rv) {
 
+  *rv = 0;
+
   /* Option #1:
    *   Retrieve all messages as a JSON array. */
 
@@ -2108,7 +2097,7 @@ boolean_t process_command(gammu_state_t *s,
 boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
 
   /* FIXME: Remove this when REPL mode is stable */
-  fprintf(stderr, "Warning: -r/--repl is experimental\n");
+  fprintf(stderr, "Warning: -r/--repl is experimental and may not work\n");
 
   for (;;) {
 
@@ -2130,16 +2119,22 @@ boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
         parsed_json_to_arguments(p, &argc, &argv, &err);
 
       if (!rv) {
-        print_validation_error(err);
+        print_json_validation_error(err);
         goto cleanup_json;
       }
 
-      if (!process_command(s, argc, argv, &err)) {
+      int result = 0;
+
+      if (!process_command(s, argc, argv, &result)) {
+
+        if (!result) {
+          print_usage_error(U_ERR_CMD_INVAL);
+        }
         goto cleanup_json;
       }
 
     } else {
-      print_validation_error(V_ERR_PARSE);
+      print_json_validation_error(V_ERR_PARSE);
     }
 
     cleanup_json:
@@ -2175,7 +2170,7 @@ int main(int argc, char *argv[]) {
   int n = parse_global_arguments(argc, argp, &app);
 
   if (app.invalid) {
-    print_usage_error(U_ERR_ARGS_INVALID);
+    print_usage_error(U_ERR_ARGS_INVAL);
     goto cleanup;
   }
   
@@ -2192,7 +2187,7 @@ int main(int argc, char *argv[]) {
 
   if (argc > 0) {
     if (!process_command(s, argc, argp, &rv)) {
-      print_usage_error(U_ERR_CMD_INVALID);
+      print_usage_error(U_ERR_CMD_INVAL);
       goto cleanup;
     }
   } else if (!app.repl) {
