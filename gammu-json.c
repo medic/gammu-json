@@ -438,7 +438,7 @@ static void print_operation_error(validation_error_t err) {
   );
 
   fprintf(stderr, "Error: %s.\n", s);
-  fprintf(stderr, "Failure while parsing JSON.\n");
+  fprintf(stderr, "Failure while validating JSON.\n");
 }
 /* --- */
 
@@ -457,29 +457,31 @@ typedef enum {
  */
 static const char *const json_validation_errors[] = {
   /* 0 */  "success; no error",
-  /* 1 */  "parser memory limit exceeded",
-  /* 2 */  "internal error: memory allocation failure",
-  /* 3 */  "internal error: integer value would overflow",
-  /* 4 */  "root entity must be an object",
-  /* 5 */  "property names must be strings",
-  /* 6 */  "object contains one or more incomplete key/value pairs",
-  /* 7 */  "value for the `command` property must be a string",
-  /* 8 */  "value for `arguments` property must be an array",
-  /* 9 */  "arguments must be either strings or numeric values",
-  /* 10 */ "non-string values in `arguments` must be numeric",
-  /* 11 */ "one or more required properties are missing"
+  /* 1 */  "parse error: invalid or malformed JSON",
+  /* 2 */  "parser memory limit exceeded",
+  /* 3 */  "internal error: memory allocation failure",
+  /* 4 */  "internal error: integer value would overflow",
+  /* 5 */  "root entity must be an object",
+  /* 6 */  "property names must be strings",
+  /* 7 */  "object contains one or more incomplete key/value pairs",
+  /* 8 */  "value for the `command` property must be a string",
+  /* 9 */  "value for `arguments` property must be an array",
+  /* 10 */ "arguments must be either strings or numeric values",
+  /* 11 */ "non-string values in `arguments` must be numeric",
+  /* 12 */ "one or more required properties are missing"
 };
 
 /**
  * @name validation_error_t:
  */
 typedef enum {
-  V_ERR_NONE = 0, V_ERR_MEM_LIMIT = 1,
-    V_ERR_MEM_ALLOC = 2, V_ERR_OVERFLOW = 3,
-    V_ERR_ROOT_TYPE = 4, V_ERR_PROPS_TYPE = 5,
-    V_ERR_PROPS_ODD = 6, V_ERR_CMD_TYPE = 7,
-    V_ERR_ARGS_TYPE = 8, V_ERR_ARG_TYPE = 9,
-    V_ERR_ARGS_NUMERIC = 10, V_ERROR_PROPS_MISSING = 11, V_ERR_END = 12
+  V_ERR_NONE = 0, V_ERR_PARSE = 1,
+    V_ERR_MEM_LIMIT = 2, V_ERR_MEM_ALLOC = 3,
+    V_ERR_OVERFLOW = 3, V_ERR_ROOT_TYPE = 5,
+    V_ERR_PROPS_TYPE = 6, V_ERR_PROPS_ODD = 7,
+    V_ERR_CMD_TYPE = 8, V_ERR_ARGS_TYPE = 9,
+    V_ERR_ARG_TYPE = 10, V_ERR_ARGS_NUMERIC = 11,
+    V_ERROR_PROPS_MISSING = 12, V_ERR_END = 13
 } validation_error_t;
 
 /**
@@ -2137,7 +2139,7 @@ boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
       }
 
     } else {
-      print_operation_error(OP_ERR_JSON);
+      print_validation_error(V_ERR_PARSE);
     }
 
     cleanup_json:
