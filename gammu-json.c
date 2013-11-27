@@ -403,7 +403,7 @@ static int usage() {
  */
 static void print_usage_error(usage_error_t err) {
 
-  char *s = (
+  const char *s = (
     err < U_ERR_UNKNOWN ?
       usage_errors[err] : "unknown or unhandled error"
   );
@@ -417,7 +417,7 @@ static void print_usage_error(usage_error_t err) {
  */
 static void print_operation_error(operation_error_t err) {
 
-  char *s = (
+  const char *s = (
     err < OP_ERR_UNKNOWN ?
       operation_errors[err] : "unknown or unhandled error"
   );
@@ -427,19 +427,6 @@ static void print_operation_error(operation_error_t err) {
   fprintf(stderr, "Check Gammu's configuration if difficulties persist.\n");
 }
 
-/**
- * @name print_validation_error:
- */
-static void print_operation_error(validation_error_t err) {
-
-  char *s = (
-    err < V_ERR_UNKNOWN ?
-      operation_errors[err] : "unknown or unhandled error"
-  );
-
-  fprintf(stderr, "Error: %s.\n", s);
-  fprintf(stderr, "Failure while parsing JSON.\n");
-}
 /* --- */
 
 #define json_argument_list_start    (128)
@@ -479,21 +466,21 @@ typedef enum {
     V_ERR_ROOT_TYPE = 4, V_ERR_PROPS_TYPE = 5,
     V_ERR_PROPS_ODD = 6, V_ERR_CMD_TYPE = 7,
     V_ERR_ARGS_TYPE = 8, V_ERR_ARG_TYPE = 9,
-    V_ERR_ARGS_NUMERIC = 10, V_ERROR_PROPS_MISSING = 11, V_ERR_END = 12
+    V_ERR_ARGS_NUMERIC = 10, V_ERR_PROPS_MISSING = 11, V_ERR_UNKNOWN = 12
 } validation_error_t;
 
 /**
- * @name json_validation_error_to_string:
+ * @name print_json_validation_error:
  */
-const char *json_validation_error_to_string(int err) {
+static void print_json_validation_error(validation_error_t err) {
 
-  if (err >= 0 && err < sizeof(json_validation_errors)) {
-    return json_validation_errors[err];
-  } else {
-    return json_validation_errors[
-      (sizeof(json_validation_errors) / sizeof(const char *)) - 1
-    ];
-  }
+  const char *s = (
+    err < V_ERR_UNKNOWN ?
+      json_validation_errors[err] : "unknown or unhandled error"
+  );
+
+  fprintf(stderr, "Error: %s.\n", s);
+  fprintf(stderr, "Failure while parsing JSON.\n");
 }
 
 /**
@@ -2128,7 +2115,7 @@ boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
         parsed_json_to_arguments(p, &argc, &argv, &err);
 
       if (!rv) {
-        print_validation_error(err);
+        print_json_validation_error(err);
         goto cleanup_json;
       }
 
