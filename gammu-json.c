@@ -399,6 +399,17 @@ static int usage() {
 }
 
 /**
+ * @name print_repl_error:
+ */
+void print_repl_error(int err, const char *s) {
+
+  printf("{");
+  printf(" \"result\": \"error\",");
+  printf(" \"errno\": %d, \"error\": \"%s\" ", err, s);
+  printf("}\n");
+}
+
+/**
  * @name print_usage_error:
  */
 static void print_usage_error(usage_error_t err) {
@@ -408,8 +419,12 @@ static void print_usage_error(usage_error_t err) {
       usage_errors[err] : "unknown or unhandled error"
   );
 
-  fprintf(stderr, "Error: %s.\n", s);
-  fprintf(stderr, "Use `-h' or `--help' to view usage information.\n");
+  if (app.repl) {
+    print_repl_error(err, s);
+  } else {
+    fprintf(stderr, "Error: %s.\n", s);
+    fprintf(stderr, "Use `-h' or `--help' to view usage information.\n");
+  }
 }
 
 /**
@@ -422,9 +437,13 @@ static void print_operation_error(operation_error_t err) {
       operation_errors[err] : "unknown or unhandled error"
   );
 
-  fprintf(stderr, "Error: %s.\n", s);
-  fprintf(stderr, "Please check your command and try again.\n");
-  fprintf(stderr, "Check Gammu's configuration if difficulties persist.\n");
+  if (app.repl) {
+    print_repl_error(err, s);
+  } else {
+    fprintf(stderr, "Error: %s.\n", s);
+    fprintf(stderr, "Please check your command and try again.\n");
+    fprintf(stderr, "Check Gammu's configuration if problems persist.\n");
+  }
 }
 
 /* --- */
@@ -481,8 +500,12 @@ static void print_json_validation_error(validation_error_t err) {
       json_validation_errors[err] : "unknown or unhandled error"
   );
 
-  fprintf(stderr, "Error: %s.\n", s);
-  fprintf(stderr, "Failure while parsing/validating JSON.\n");
+  if (app.repl) {
+    print_repl_error(err, s);
+  } else {
+    fprintf(stderr, "Error: %s.\n", s);
+    fprintf(stderr, "Failure while parsing/validating JSON.\n");
+  }
 }
 
 /**
@@ -2038,8 +2061,13 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
     }
 
     if (strcmp(*argp, "-r") == 0 || strcmp(*argp, "--repl") == 0) {
+
       o->repl = TRUE;
       ++argp; ++rv;
+
+      /* FIXME: Remove this when REPL mode is stable */
+      fprintf(stderr, "Warning: -r/--repl is experimental code\n");
+
       continue;
     }
 
@@ -2095,9 +2123,6 @@ boolean_t process_command(gammu_state_t *s,
  * @name process_repl_commands:
  */
 boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
-
-  /* FIXME: Remove this when REPL mode is stable */
-  fprintf(stderr, "Warning: -r/--repl is experimental and may not work\n");
 
   for (;;) {
 
@@ -2188,7 +2213,6 @@ int main(int argc, char *argv[]) {
   if (argc > 0) {
     if (!process_command(s, argc, argp, &rv)) {
       print_usage_error(U_ERR_CMD_INVAL);
-      goto cleanup;
     }
   } else if (!app.repl) {
     print_usage_error(U_ERR_CMD_MISSING);
@@ -2200,7 +2224,7 @@ int main(int argc, char *argv[]) {
    *  them in to command/arguments tuples, dispatch these tuples
    *  to `process_command`, and repeat until reaching end-of-file. */
 
-  if (app.repl && rv == 0) {
+  if (app.repl) {
     process_repl_commands(s, stdin);
   }
 
