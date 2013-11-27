@@ -98,12 +98,12 @@ const static char *usage_text = (
 );
 
 /**
- * @name boolean_t
+ * @name boolean_t:
  */
 typedef uint8_t boolean_t;
 
 /**
- * @name gammu_state_t
+ * @name gammu_state_t:
  */
 typedef struct app_options {
 
@@ -117,7 +117,7 @@ typedef struct app_options {
 } app_options_t;
 
 /**
- * @name gammu_state_t
+ * @name gammu_state_t:
  */
 typedef struct gammu_state {
 
@@ -127,39 +127,39 @@ typedef struct gammu_state {
 } gammu_state_t;
 
 /**
- * @name multimessage_t
+ * @name multimessage_t:
  */
 typedef GSM_SMSMessage message_t;
 
 /**
- * @name multimessage_t
+ * @name multimessage_t:
  */
 typedef GSM_MultiSMSMessage multimessage_t;
 
 /**
- * @name multimessage_info_t
+ * @name multimessage_info_t:
  */
 typedef GSM_MultiPartSMSInfo multimessage_info_t;
 
 /**
- * @name message_timestamp_t
+ * @name message_timestamp_t:
  */
 typedef GSM_DateTime message_timestamp_t;
 
 /**
- * @name smsc_t
+ * @name smsc_t:
  */
 typedef GSM_SMSC smsc_t;
 
 /**
- * @name message_iterate_fn_t
+ * @name message_iterate_fn_t:
  */
 typedef boolean_t (*message_iterate_fn_t)(
   gammu_state_t *, multimessage_t *, boolean_t, void *
 );
 
 /**
- * @name bitfield_t
+ * @name bitfield_t:
  */
 typedef struct bitfield {
 
@@ -170,7 +170,7 @@ typedef struct bitfield {
 } bitfield_t;
 
 /**
- * @name utf8_info_t
+ * @name utf8_info_t:
  */
 typedef struct utf8_length_info {
 
@@ -180,7 +180,7 @@ typedef struct utf8_length_info {
 } utf8_length_info_t;
 
 /**
- * @name part_transmit_status_t
+ * @name part_transmit_status_t:
  */
 typedef struct part_transmit_status {
 
@@ -192,7 +192,7 @@ typedef struct part_transmit_status {
 } part_transmit_status_t;
 
 /**
- * @name transmit_status_t
+ * @name transmit_status_t:
  */
 typedef struct transmit_status {
 
@@ -208,7 +208,7 @@ typedef struct transmit_status {
 } transmit_status_t;
 
 /**
- * @name delete_status_t
+ * @name delete_status_t:
  */
 typedef struct delete_status {
 
@@ -225,7 +225,7 @@ typedef struct delete_status {
 } delete_status_t;
 
 /**
- * @name delete_stage_t
+ * @name delete_stage_t:
  */
 typedef enum {
 
@@ -239,7 +239,7 @@ typedef enum {
 } delete_stage_t;
 
 /**
- * @name delete_stage_t
+ * @name delete_stage_t:
  */
 typedef struct parsed_json {
 
@@ -252,11 +252,65 @@ typedef struct parsed_json {
 
 
 /**
- * @name delete_callback_fn_t
+ * @name delete_callback_fn_t:
  */
 typedef void (*delete_callback_fn_t)(
   gammu_state_t *, message_t *, delete_stage_t, void *
 );
+
+/** --- **/
+
+/**
+ * @name operation_errors:
+ */
+static const char *const operation_errors[] = {
+  /* 0 */  "success; no error",
+  /* 1 */  "failed to initialize gammu",
+  /* 2 */  "failed to discover SMSC phone number",
+  /* 3 */  "failed to retrieve one or more messages",
+  /* 4 */  "one or more SMS locations are invalid",
+  /* 5 */  "failed to create in-memory message index",
+  /* 6 */  "failed to delete one or more messages",
+  /* 7 */  "parse error while processing JSON input"
+};
+
+/**
+ * @name operation_error_t:
+ */
+typedef enum {
+  OP_ERR_NONE = 0, OP_ERR_INIT = 1,
+    OP_ERR_SMSC = 2, OP_ERR_RETRIEVE = 3,
+    OP_ERR_LOCATION = 4, OP_ERR_INDEX = 5,
+    OP_ERR_DELETE = 6, OP_ERR_JSON = 7, OP_ERR_UNKNOWN = 8
+} operation_error_t;
+
+/**
+ * @name usage_errors:
+ */
+static const char *const usage_errors[] = {
+  /* 0 */  "success; no error",
+  /* 1 */  "not enough arguments provided",
+  /* 2 */  "odd number of arguments provided",
+  /* 3 */  "no configuration file name provided",
+  /* 4 */  "one or more invalid argument(s) provided",
+  /* 5 */  "invalid command specified",
+  /* 6 */  "no command specified",
+  /* 7 */  "location(s) must be specified",
+  /* 8 */  "no valid location(s) specified",
+  /* 9 */  "integer argument would overflow"
+};
+
+/**
+ * @name usage_error_t:
+ */
+typedef enum {
+  U_ERR_NONE = 0, U_ERR_ARGS_MISSING = 1,
+    U_ERR_ARGS_ODD = 2, U_ERR_CONFIG_MISSING = 3,
+    U_ERR_ARGS_INVALID = 4, U_ERR_CMD_INVALID = 5,
+    U_ERR_CMD_MISSING = 6, U_ERR_LOC_MISSING = 7,
+    U_ERR_LOC_INVALID = 8, U_ERR_OVERFLOW = 9, U_ERR_UNKNOWN = 10
+} usage_error_t;
+
 
 /** --- **/
 
@@ -335,6 +389,57 @@ char *read_line(FILE *stream, boolean_t *eof) {
     return NULL;
 }
 
+/**
+ * @name usage:
+ */
+static int usage() {
+
+  fprintf(stderr, usage_text, app.application_name);
+  return 127;
+}
+
+/**
+ * @name print_usage_error:
+ */
+static void print_usage_error(usage_error_t err) {
+
+  char *s = (
+    err < U_ERR_UNKNOWN ?
+      usage_errors[err] : "unknown or unhandled error"
+  );
+
+  fprintf(stderr, "Error: %s.\n", s);
+  fprintf(stderr, "Use `-h' or `--help' to view usage information.\n");
+}
+
+/**
+ * @name print_operation_error:
+ */
+static void print_operation_error(operation_error_t err) {
+
+  char *s = (
+    err < OP_ERR_UNKNOWN ?
+      operation_errors[err] : "unknown or unhandled error"
+  );
+
+  fprintf(stderr, "Error: %s.\n", s);
+  fprintf(stderr, "Please check your command and try again.\n");
+  fprintf(stderr, "Check Gammu's configuration if difficulties persist.\n");
+}
+
+/**
+ * @name print_validation_error:
+ */
+static void print_operation_error(validation_error_t err) {
+
+  char *s = (
+    err < V_ERR_UNKNOWN ?
+      operation_errors[err] : "unknown or unhandled error"
+  );
+
+  fprintf(stderr, "Error: %s.\n", s);
+  fprintf(stderr, "Failure while parsing JSON.\n");
+}
 /* --- */
 
 #define json_argument_list_start    (128)
@@ -350,7 +455,7 @@ typedef enum {
 /**
  * @name json_validation_errors:
  */
-const char *const json_validation_errors[] = {
+static const char *const json_validation_errors[] = {
   /* 0 */  "success; no error",
   /* 1 */  "parser memory limit exceeded",
   /* 2 */  "internal error: memory allocation failure",
@@ -362,9 +467,20 @@ const char *const json_validation_errors[] = {
   /* 8 */  "value for `arguments` property must be an array",
   /* 9 */  "arguments must be either strings or numeric values",
   /* 10 */ "non-string values in `arguments` must be numeric",
-  /* 11 */ "one or more required properties are missing",
-  /* 12 */ "unknown or unhandled error"
+  /* 11 */ "one or more required properties are missing"
 };
+
+/**
+ * @name validation_error_t:
+ */
+typedef enum {
+  V_ERR_NONE = 0, V_ERR_MEM_LIMIT = 1,
+    V_ERR_MEM_ALLOC = 2, V_ERR_OVERFLOW = 3,
+    V_ERR_ROOT_TYPE = 4, V_ERR_PROPS_TYPE = 5,
+    V_ERR_PROPS_ODD = 6, V_ERR_CMD_TYPE = 7,
+    V_ERR_ARGS_TYPE = 8, V_ERR_ARG_TYPE = 9,
+    V_ERR_ARGS_NUMERIC = 10, V_ERROR_PROPS_MISSING = 11, V_ERR_END = 12
+} validation_error_t;
 
 /**
  * @name json_validation_error_to_string:
@@ -424,17 +540,17 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
 
       /* Increase size, then check against memory limit */
       if (size > json_argument_list_maximum) {
-        return_validation_error(1);
+        return_validation_error(V_ERR_MEM_LIMIT);
       }
 
       /* Paranoia: check for overflow */
       if (multiplication_will_overflow(size, sizeof(char *))) {
-        return_validation_error(2);
+        return_validation_error(V_ERR_OVERFLOW);
       }
 
       /* Enlarge array of argument pointers */
       if (!(rv = (char **) realloc(rv, size * sizeof(char *)))) {
-        return_validation_error(3);
+        return_validation_error(V_ERR_MEM_ALLOC);
       }
     }
 
@@ -443,11 +559,11 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
       case START: {
 
         if (t->type != JSMN_OBJECT) {
-          return_validation_error(4);
+          return_validation_error(V_ERR_ROOT_TYPE);
         }
 
         if (t->size % 2 != 0) {
-          return_validation_error(6);
+          return_validation_error(V_ERR_PROPS_ODD);
         }
 
         object_size = t->size;
@@ -463,19 +579,19 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
         }
 
         if (t->type != JSMN_STRING) {
-          return_validation_error(5);
+          return_validation_error(V_ERR_PROPS_TYPE);
         }
 
         char *s = jsmn_stringify_token(p->json, t);
 
         if (!(t = token_lookahead(i, 1))) {
-          return_validation_error(6);
+          return_validation_error(V_ERR_PROPS_ODD);
         }
 
         if (strcmp(s, "command") == 0) {
 
           if (t->type != JSMN_STRING) {
-            return_validation_error(7);
+            return_validation_error(V_ERR_CMD_TYPE);
           }
 
           rv[0] = jsmn_stringify_token(p->json, t);
@@ -484,7 +600,7 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
         } else if (strcmp(s, "arguments") == 0) {
 
           if (t->type != JSMN_ARRAY && t->type != JSMN_OBJECT) {
-            return_validation_error(8);
+            return_validation_error(V_ERR_ARGS_TYPE);
           }
 
           /* Handle empty arrays */
@@ -510,14 +626,14 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
       case IN_ARGUMENTS_ARRAY: {
 
         if (t->type != JSMN_PRIMITIVE && t->type != JSMN_STRING) {
-          return_validation_error(9);
+          return_validation_error(V_ERR_ARG_TYPE);
         }
 
         char *s = jsmn_stringify_token(p->json, t);
 
         /* Require that primitives are numeric */
         if (t->type == JSMN_PRIMITIVE && (!s || !isdigit(s[0]))) {
-          return_validation_error(10);
+          return_validation_error(V_ERR_ARGS_NUMERIC);
         }
 
         rv[++n] = s;
@@ -535,14 +651,14 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
       }
 
       default: {
-        return_validation_error(12);
+        return_validation_error(V_ERR_UNKNOWN);
         break;
       }
     }
   }
 
   if (state != SUCCESS) {
-    return_validation_error(11);
+    return_validation_error(V_ERR_PROPS_MISSING);
   }
 
   /* Victory */
@@ -671,25 +787,6 @@ parsed_json_t *parse_json(char *json) {
 
     /* Parsed successfully */
     rv->nr_tokens = n;
-    print_parsed_json(rv);
-
-    char **argv = NULL;
-    int argc = 0, err = 0;
-
-    boolean_t r = parsed_json_to_arguments(rv, &argc, &argv, &err);
-
-    printf("result: %s\n", (r ? "true" : "false"));
-    printf("error status: %s\n", json_validation_error_to_string(err));
-
-    printf("yield: ");
-
-    for (int i = 0; i < argc; ++i) {
-      printf("'%s' ", argv[i]);
-    }
-
-    printf("\n");
-    free(argv);
-
     break;
   }
 
@@ -775,33 +872,6 @@ app_options_t *initialize_application_options(app_options_t *o) {
   return o;
 }
 
-/**
- * @name usage:
- */
-static int usage() {
-
-  fprintf(stderr, usage_text, app.application_name);
-  return 127;
-}
-
-/**
- * @name print_usage_error:
- */
-static void print_usage_error(const char *s) {
-
-  fprintf(stderr, "Error: %s.\n", s);
-  fprintf(stderr, "Use `-h' or `--help' to view usage information.\n");
-}
-
-/**
- * @name print_operation_error:
- */
-static void print_operation_error(const char *s) {
-
-  fprintf(stderr, "Error: %s.\n", s);
-  fprintf(stderr, "Please check your command and try again.\n");
-  fprintf(stderr, "Check Gammu's configuration if difficulties persist.\n");
-}
 /**
  * @name utf8_string_length:
  */
@@ -1396,12 +1466,12 @@ int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    print_operation_error("failed to start gammu");
+    print_operation_error(OP_ERR_INIT);
     rv = 1; goto cleanup;
   }
 
   if (!print_messages_json_utf8(s)) {
-    print_operation_error("failed to retrieve one or more messages");
+    print_operation_error(OP_ERR_RETRIEVE);
     rv = 2; goto cleanup;
   }
 
@@ -1621,7 +1691,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   bitfield_t *bf = NULL;
 
   if (argc < 2) {
-    print_usage_error("deletion location(s) must be specified");
+    print_usage_error(U_ERR_LOC_MISSING);
     return 1;
   }
 
@@ -1633,24 +1703,24 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     boolean_t found = find_maximum_integer_argument(&n, &argv[1]);
 
     if (!found) {
-      print_usage_error("no valid location(s) specified");
+      print_usage_error(U_ERR_LOC_INVALID);
       rv = 2; goto cleanup;
     }
 
     if (n == ULONG_MAX && errno == ERANGE) {
-      print_usage_error("integer argument would overflow");
+      print_usage_error(U_ERR_OVERFLOW);
       rv = 3; goto cleanup;
     }
 
     bf = bitfield_create(n);
 
     if (!bf) {
-      print_operation_error("failed to create deletion index");
+      print_operation_error(OP_ERR_INDEX);
       rv = 4; goto cleanup_delete;
     }
 
     if (!bitfield_set_integer_arguments(bf, &argv[1])) {
-      print_operation_error("one or more location(s) are invalid");
+      print_operation_error(OP_ERR_LOCATION);
       rv = 5; goto cleanup_delete;
     }
   }
@@ -1658,14 +1728,14 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    print_operation_error("failed to initialize gammu");
+    print_operation_error(OP_ERR_INIT);
     rv = 6; goto cleanup_delete;
   }
 
   printf("{");
 
   if (!delete_selected_messages(s, bf)) {
-    print_operation_error("failed to delete one or more messages");
+    print_operation_error(OP_ERR_DELETE);
     rv = 7; goto cleanup_json;
   }
 
@@ -1779,12 +1849,12 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   char **argp = &argv[1];
 
   if (argc <= 2) {
-    print_usage_error("not enough arguments provided");
+    print_usage_error(U_ERR_ARGS_MISSING);
     return 1;
   }
 
   if (argc % 2 != 1) {
-    print_usage_error("odd number of arguments provided");
+    print_usage_error(U_ERR_ARGS_ODD);
     return 2;
   }
 
@@ -1802,7 +1872,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    print_operation_error("failed to start gammu subsystem");
+    print_operation_error(OP_ERR_INIT);
     rv = 3; goto cleanup;
   }
 
@@ -1810,7 +1880,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   smsc->Location = 1;
 
   if ((s->err = GSM_GetSMSC(s->sm, smsc)) != ERR_NONE) {
-    print_operation_error("failed to discover SMSC phone number");
+    print_operation_error(OP_ERR_SMSC);
     rv = 4; goto cleanup_sms;
   }
 
@@ -1961,7 +2031,7 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
     if (strcmp(*argp, "-c") == 0 || strcmp(*argp, "--config") == 0) {
 
       if (*++argp == NULL) {
-        print_usage_error("no configuration file name provided");
+        print_usage_error(U_ERR_CONFIG_MISSING);
         o->invalid = TRUE;
         break;
       }
@@ -2033,7 +2103,10 @@ boolean_t process_command(gammu_state_t *s,
 /**
  * @name process_repl_commands:
  */
-boolean_t process_repl_commands(FILE *stream) {
+boolean_t process_repl_commands(gammu_state_t *s, FILE *stream) {
+
+  /* FIXME: Remove this when REPL mode is stable */
+  fprintf(stderr, "Warning: -r/--repl is experimental\n");
 
   for (;;) {
 
@@ -2047,19 +2120,37 @@ boolean_t process_repl_commands(FILE *stream) {
     parsed_json_t *p = parse_json(line);
 
     if (p) {
-      release_parsed_json(p);
+
+      char **argv = NULL;
+      int argc = 0, err = 0;
+
+      boolean_t rv =
+        parsed_json_to_arguments(p, &argc, &argv, &err);
+
+      if (!rv) {
+        print_validation_error(err);
+        goto cleanup_json;
+      }
+
+      if (!process_command(s, argc, argv, &err)) {
+        goto cleanup_json;
+      }
+
     } else {
-      printf("{");
-      printf("\"result\": \"error\",");
-      printf("\"error\": \"Parse error\", \"errno\": 1");
-      printf("}\n");
+      print_operation_error(OP_ERR_JSON);
     }
 
-    free(line);
+    cleanup_json:
 
-    if (is_eof) {
-      break;
-    }
+      if (p) {
+        release_parsed_json(p);
+      }
+
+      free(line);
+
+      if (is_eof) {
+        break;
+      }
   }
 
   return TRUE;
@@ -2082,7 +2173,7 @@ int main(int argc, char *argv[]) {
   int n = parse_global_arguments(argc, argp, &app);
 
   if (app.invalid) {
-    print_usage_error("one or more invalid argument(s) provided");
+    print_usage_error(U_ERR_ARGS_INVALID);
     goto cleanup;
   }
   
@@ -2099,11 +2190,11 @@ int main(int argc, char *argv[]) {
 
   if (argc > 0) {
     if (!process_command(s, argc, argp, &rv)) {
-      print_usage_error("invalid command specified");
+      print_usage_error(U_ERR_CMD_INVALID);
       goto cleanup;
     }
   } else if (!app.repl) {
-    print_usage_error("no command specified");
+    print_usage_error(U_ERR_CMD_MISSING);
     goto cleanup;
   }
 
@@ -2113,13 +2204,15 @@ int main(int argc, char *argv[]) {
    *  to `process_command`, and repeat until reaching end-of-file. */
 
   if (app.repl && rv == 0) {
-    process_repl_commands(stdin);
+    process_repl_commands(s, stdin);
   }
 
   cleanup:
+
     if (s) {
       gammu_destroy(s);
     }
+
     return rv;
 }
 
