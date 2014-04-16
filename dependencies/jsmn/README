@@ -1,0 +1,159 @@
+JSMN
+====
+
+jsmn (pronounced like 'jasmine') is a minimalistic JSON parser in C.  It can be
+easily integrated into resource-limited or embedded projects.
+
+You can find more information about JSON format at [json.org][1]
+
+Library sources are available at [bitbucket.org/zserge/jsmn][2]
+
+Philosophy
+----------
+
+Most JSON parsers offer you a bunch of functions to load JSON data, parse it,
+and extract any value by its name. The author of jsmn believes that checking
+the correctness of every JSON packet or allocating temporary objects to store
+parsed JSON fields often is an overkill.
+
+The JSON format itself is extremely simple, so why should we complicate it?
+
+The jsmn library is designed to be  **robust** (it should work fine even with
+erroneous data), **fast** (it should parse data on the fly), **portable** (no
+superfluous dependencies or non-standard C extensions). **Simplicity** is also
+a key feature -- simple code style, simple algorithm, simple integration into
+other projects.
+
+Features
+--------
+
+* Compatible with C89
+* No dependencies (even libc!)
+* Highly portable (tested on x86/amd64, ARM, AVR)
+* About 200 lines of code
+* Extremely small code footprint
+* API contains only 2 functions
+* No dynamic memory allocation
+* Incremental single-pass parsing
+* Library code is covered with unit tests
+
+Design
+------
+
+The rudimentary jsmn object is a **token**. Let's consider a JSON string:
+
+    '{ "name" : "Jack", "age" : 27 }'
+
+It holds the following tokens:
+
+* Object: `{ "name" : "Jack", "age" : 27}` (the whole object)
+* Strings: `"name"`, `"Jack"`, `"age"` (keys and some values)
+* Number: `27`
+
+In jsmn, tokens do not hold any data, but instead point to token boundaries in
+the original JSON string. In the example above, jsmn will create tokens like
+this: Object [0..31], String [3..7], String [12..16], String [20..23], Number
+[27..29].
+
+Every jsmn token has a type, which indicates the type of corresponding JSON
+token. The jsmn library supports the following token types:
+
+* Object: a container of key-value pairs, e.g.:
+    `{ "foo":"bar", "x":0.3 }`
+* Array: a sequence of values, e.g.:
+    `[ 1, 2, 3 ]`
+* String: a quoted sequence of chars, e.g.: `"foo"`
+* Primitive: a number, a boolean value (i.e. `true` or `false`), or `null`
+
+Besides start/end positions, jsmn tokens for complex types (like arrays
+or objects) also contain a number of child items, so you can easily follow
+object hierarchy.
+
+This approach provides enough information to parse any JSON data,a and makes it
+possible to use zero-copy techniques.
+
+Install
+-------
+
+To clone the original source repository, you must have Mercurial installed.
+Just run:
+
+    $ hg clone http://bitbucket.org/zserge/jsmn jsmn
+
+The jsmn repository layout is simple: jsmn.c and jsmn.h are library files, the
+README and LICENSE files provide documentation, and the Makefile can be used
+with GNU make to build jsmn.
+
+To build the library, run `make`. If build was successful, you should get a
+`libjsmn.a` library.  The header file you should include is called `"jsmn.h"`.
+
+API
+---
+
+Token types are described by `jsmntype_t`:
+
+    typedef enum {
+        JSMN_OBJECT,
+        JSMN_ARRAY,
+        JSMN_STRING,
+        JSMN_PRIMITIVE
+    } jsmntype_t;
+
+Unlike JSON data types, primitive tokens are not divided into numbers, booleans
+and null, because one can easily tell the type using the first character:
+
+* <code>'t', 'f'</code> - boolean 
+* <code>'n'</code> - null
+* <code>'-', '0'..'9'</code> - number
+
+Token is an object of `jsmntok_t` type:
+
+    typedef struct {
+        jsmntype_t type; // Token type
+        int start;       // Token start position
+        int end;         // Token end position
+        int size;        // Number of child (nested) tokens
+    } jsmntok_t;
+
+String tokens point to the first character after the opening quote and the
+previous symbol before final quote. This was made to simplify string extraction
+from JSON data.
+
+All parsing is done by `jsmn_parser` object. You can initialize a new parser
+using:
+
+    struct jsmn_parser parser;
+    jsmntok_t tokens[10];
+
+    // js - pointer to JSON string
+    // tokens - an array of tokens available
+    // 10 - number of tokens available
+    jsmn_init_parser(&parser, js, tokens, 10);
+
+This will create a parser that can parse up to 10 JSON tokens from `js` string.
+
+Later, you can use `jsmn_parse(&parser)` function to parse a JSON string using
+the JSON parser.  If something goes wrong, you will get an error. Error will be
+one of these:
+
+* `JSMN_SUCCESS` - everything went fine. String was parsed
+* `JSMN_ERROR_INVAL` - bad token, JSON string is corrupted
+* `JSMN_ERROR_NOMEM` - not enough tokens, JSON string is too large
+* `JSMN_ERROR_PART` - JSON string is too short, expecting more JSON data
+
+If you receive the `JSON_ERROR_NOMEM` error, you can re-allocate more tokens
+and call `jsmn_parse` once more. If you are reading JSON data from a stream,
+you can periodically call `jsmn_parse` and check if the return value is
+`JSON_ERROR_PART`.  You will get this error until you reach the end of JSON
+data.
+
+Other info
+----------
+
+This software is distributed under the MIT license; feel free to integrate it
+in your open-source or commercial products, and modify it as you see fit.
+
+[1]: http://www.json.org/
+[2]: https://bitbucket.org/zserge/jsmn/wiki/Home
+[3]: http://www.opensource.org/licenses/mit-license.php
+

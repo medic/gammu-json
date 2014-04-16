@@ -1,12 +1,49 @@
+/**
+ * gammu-json
+ *
+ * Copyright (c) 2013 David Brown <hello at scri.pt>.
+ * Copyright (c) 2013 Medic Mobile, Inc. <david at medicmobile.org>
+ *
+ * All rights reserved.
+ *
+ * This is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License, version three,
+ * as published by the Free Software Foundation.
+ *
+ * You should have received a copy of version three of the GNU General
+ * Public License along with this software. If you did not, see
+ * http://www.gnu.org/licenses/.
+ *
+ * This software is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL DAVID BROWN OR
+ * MEDIC MOBILE BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#define _GNU_SOURCE
 
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <limits.h>
+#include <ctype.h>
 #include <inttypes.h>
 
 #include <gammu.h>
+#include <jsmn.h>
 
 #define TIMESTAMP_MAX_WIDTH (64)
 #define BITFIELD_CELL_WIDTH (CHAR_BIT)
@@ -18,25 +55,38 @@ const static char *usage_text = (
   "\n"
   "Global options:\n"
   "\n"
-  "  -h, --help                 Print this useful message\n"
+  "  -c, --config <file>       Specify path to Gammu configuration file\n"
+  "                            (default: /etc/gammurc).\n"
   "\n"
-  "  -c, --config <file>        Specify path to Gammu configuration file\n"
-  "                             (default: /etc/gammurc)\n"
+  "  -h, --help                Print this helpful message.\n"
+  "\n"
+  "  -r, --repl                Run in `read, evaluate, print' loop mode.\n"
+  "                            Read a single-line JSON-encoded command\n"
+  "                            from stdin, execute the command, then\n"
+  "                            print its result as a single line of JSON\n"
+  "                            on stdout. Repeat this until end-of-file is\n"
+  "                            reached on stdin. If a command is provided\n"
+  "                            via command-line arguments, execute it before\n"
+  "                            attempting to read more commands from stdin.\n"
+  "\n"
+  "  -v, --verbose             Ask Gammu to print debugging information\n"
+  "                            to stderr while performing operations.\n"
+  "\n"
   "Commands:\n"
   "\n"
-  "  retrieve                   Retrieve all messages from a device, as a\n"
-  "                             JSON-encoded array of objects, on stdout.\n"
+  "  retrieve                  Retrieve all messages from a device, as a\n"
+  "                            JSON-encoded array of objects, on stdout.\n"
   "\n"
-  "  delete { all | N... }      Delete one or more messages from a device,\n"
-  "                             using location numbers to identify them.\n"
-  "                             Specify 'all' to delete any messages found.\n"
-  "                             Prints JSON-encoded information about any\n"
-  "                             deleted/skipped/missing messages on stdout.\n"
+  "  delete { all | N... }     Delete one or more messages from a device,\n"
+  "                            using location numbers to identify them.\n"
+  "                            Specify `all' to delete any messages found.\n"
+  "                            Prints JSON-encoded information about any\n"
+  "                            deleted/skipped/missing messages on stdout.\n"
   "\n"
-  "  send { phone text }...     Send one or more messages. Each message is\n"
-  "                             sent to exactly one phone number. Prints\n"
-  "                             JSON-encoded information about the sent\n"
-  "                             messages on stdout.\n"
+  "  send { phone text }...    Send one or more messages. Each message is\n"
+  "                            sent to exactly one phone number. Prints\n"
+  "                            JSON-encoded information about the sent\n"
+  "                            messages on stdout.\n"
   "About:\n"
   "\n"
   "  Copyright (c) 2013 David Brown <hello at scri.pt>.\n"
@@ -48,23 +98,26 @@ const static char *usage_text = (
 );
 
 /**
- * @name boolean_t
+ * @name boolean_t:
  */
 typedef uint8_t boolean_t;
 
 /**
- * @name gammu_state_t
+ * @name gammu_state_t:
  */
 typedef struct app_options {
 
+  boolean_t help;
+  boolean_t repl;
   boolean_t invalid;
+  boolean_t verbose;
   char *application_name;
   char *gammu_configuration_path;
 
 } app_options_t;
 
 /**
- * @name gammu_state_t
+ * @name gammu_state_t:
  */
 typedef struct gammu_state {
 
@@ -74,39 +127,39 @@ typedef struct gammu_state {
 } gammu_state_t;
 
 /**
- * @name multimessage_t
+ * @name multimessage_t:
  */
 typedef GSM_SMSMessage message_t;
 
 /**
- * @name multimessage_t
+ * @name multimessage_t:
  */
 typedef GSM_MultiSMSMessage multimessage_t;
 
 /**
- * @name multimessage_info_t
+ * @name multimessage_info_t:
  */
 typedef GSM_MultiPartSMSInfo multimessage_info_t;
 
 /**
- * @name message_timestamp_t
+ * @name message_timestamp_t:
  */
 typedef GSM_DateTime message_timestamp_t;
 
 /**
- * @name smsc_t
+ * @name smsc_t:
  */
 typedef GSM_SMSC smsc_t;
 
 /**
- * @name message_iterate_fn_t
+ * @name message_iterate_fn_t:
  */
 typedef boolean_t (*message_iterate_fn_t)(
   gammu_state_t *, multimessage_t *, boolean_t, void *
 );
 
 /**
- * @name bitfield_t
+ * @name bitfield_t:
  */
 typedef struct bitfield {
 
@@ -117,7 +170,7 @@ typedef struct bitfield {
 } bitfield_t;
 
 /**
- * @name utf8_info_t
+ * @name utf8_info_t:
  */
 typedef struct utf8_length_info {
 
@@ -127,7 +180,7 @@ typedef struct utf8_length_info {
 } utf8_length_info_t;
 
 /**
- * @name part_transmit_status_t
+ * @name part_transmit_status_t:
  */
 typedef struct part_transmit_status {
 
@@ -139,7 +192,7 @@ typedef struct part_transmit_status {
 } part_transmit_status_t;
 
 /**
- * @name transmit_status_t
+ * @name transmit_status_t:
  */
 typedef struct transmit_status {
 
@@ -155,7 +208,7 @@ typedef struct transmit_status {
 } transmit_status_t;
 
 /**
- * @name delete_status_t
+ * @name delete_status_t:
  */
 typedef struct delete_status {
 
@@ -172,7 +225,7 @@ typedef struct delete_status {
 } delete_status_t;
 
 /**
- * @name delete_stage_t
+ * @name delete_stage_t:
  */
 typedef enum {
 
@@ -186,11 +239,593 @@ typedef enum {
 } delete_stage_t;
 
 /**
- * @name delete_callback_fn_t
+ * @name delete_stage_t:
+ */
+typedef struct parsed_json {
+
+  char *json;
+  jsmn_parser parser;
+  jsmntok_t *tokens;
+  unsigned int nr_tokens;
+
+} parsed_json_t;
+
+
+/**
+ * @name delete_callback_fn_t:
  */
 typedef void (*delete_callback_fn_t)(
   gammu_state_t *, message_t *, delete_stage_t, void *
 );
+
+/** --- **/
+
+/**
+ * @name operation_errors:
+ */
+static const char *const operation_errors[] = {
+  /* 0 */  "success; no error",
+  /* 1 */  "failed to initialize gammu",
+  /* 2 */  "failed to discover SMSC phone number",
+  /* 3 */  "failed to retrieve one or more messages",
+  /* 4 */  "one or more SMS locations are invalid",
+  /* 5 */  "failed to create in-memory message index",
+  /* 6 */  "failed to delete one or more messages",
+  /* 7 */  "parse error while processing JSON input"
+};
+
+/**
+ * @name operation_error_t:
+ */
+typedef enum {
+  OP_ERR_NONE = 0, OP_ERR_INIT = 1,
+    OP_ERR_SMSC = 2, OP_ERR_RETRIEVE = 3,
+    OP_ERR_LOCATION = 4, OP_ERR_INDEX = 5,
+    OP_ERR_DELETE = 6, OP_ERR_JSON = 7, OP_ERR_UNKNOWN = 8
+} operation_error_t;
+
+/**
+ * @name usage_errors:
+ */
+static const char *const usage_errors[] = {
+  /* 0 */  "success; no error",
+  /* 1 */  "not enough arguments provided",
+  /* 2 */  "odd number of arguments provided",
+  /* 3 */  "no configuration file name provided",
+  /* 4 */  "one or more invalid argument(s) provided",
+  /* 5 */  "invalid command specified",
+  /* 6 */  "no command specified",
+  /* 7 */  "location(s) must be specified",
+  /* 8 */  "no valid location(s) specified",
+  /* 9 */  "integer argument would overflow"
+};
+
+/**
+ * @name usage_error_t:
+ */
+typedef enum {
+  U_ERR_NONE = 0, U_ERR_ARGS_MISSING = 1,
+    U_ERR_ARGS_ODD = 2, U_ERR_CONFIG_MISSING = 3,
+    U_ERR_ARGS_INVAL = 4, U_ERR_CMD_INVAL = 5,
+    U_ERR_CMD_MISSING = 6, U_ERR_LOC_MISSING = 7,
+    U_ERR_LOC_INVAL = 8, U_ERR_OVERFLOW = 9, U_ERR_UNKNOWN = 10
+} usage_error_t;
+
+
+/** --- **/
+
+static app_options_t app; /* global */
+
+/** --- **/
+
+int multiplication_will_overflow(size_t n, size_t s) {
+
+  return (((size_t) -1 / s) < n);
+}
+
+/**
+ * @name malloc_and_zero
+ */
+static void *malloc_and_zero(int size) {
+
+  void *rv = malloc(size);
+
+  if (!rv) {
+    fprintf(stderr, "Fatal error: failed to allocate %d bytes\n", size);
+    exit(111);
+  }
+
+  memset(rv, '\0', size);
+  return rv;
+}
+
+#define line_size_start    (1024)
+#define line_size_maximum  (4194304)
+
+/**
+ * @name read_line:
+ *   Read a line portably, relying only upon the C library's
+ *   `getc` standard I/O function. This should work on any
+ *   platform that has a standard I/O (stdio)  implementation.
+ */
+char *read_line(FILE *stream, boolean_t *eof) {
+
+  int c;
+  char *rv = NULL;
+  unsigned int i = 0;
+  unsigned int size = 0;
+
+  for (;;) {
+
+    if (!size || i >= size) {
+      size = (size ? size * 8 : line_size_start);
+
+      if (!(rv = (char *) realloc(rv, size + 1))) {
+        goto allocation_error;
+      }
+    }
+
+    c = getc(stream);
+
+    if (c == '\n') {
+      break;
+    } else if (c == EOF) {
+      *eof = TRUE;
+      break;
+    }
+
+    rv[i++] = c;
+  }
+
+  rv[i] = '\0';
+  return rv;
+
+  allocation_error:
+
+    if (rv) {
+      free(rv);
+    }
+
+    return NULL;
+}
+
+/**
+ * @name usage:
+ */
+static int usage() {
+
+  fprintf(stderr, usage_text, app.application_name);
+  return 127;
+}
+
+/**
+ * @name print_repl_error:
+ */
+void print_repl_error(int err, const char *s) {
+
+  printf("{");
+  printf(" \"result\": \"error\",");
+  printf(" \"errno\": %d, \"error\": \"%s\" ", err, s);
+  printf("}\n");
+}
+
+/**
+ * @name print_usage_error:
+ */
+static void print_usage_error(usage_error_t err) {
+
+  const char *s = (
+    err < U_ERR_UNKNOWN ?
+      usage_errors[err] : "unknown or unhandled error"
+  );
+
+  if (app.repl) {
+    print_repl_error(err, s);
+  } else {
+    fprintf(stderr, "Error: %s.\n", s);
+    fprintf(stderr, "Use `-h' or `--help' to view usage information.\n");
+  }
+}
+
+/**
+ * @name print_operation_error:
+ */
+static void print_operation_error(operation_error_t err) {
+
+  const char *s = (
+    err < OP_ERR_UNKNOWN ?
+      operation_errors[err] : "unknown or unhandled error"
+  );
+
+  if (app.repl) {
+    print_repl_error(err, s);
+  } else {
+    fprintf(stderr, "Error: %s.\n", s);
+    fprintf(stderr, "Please check your command and try again.\n");
+    fprintf(stderr, "Check Gammu's configuration if problems persist.\n");
+  }
+}
+
+/* --- */
+
+#define json_argument_list_start    (128)
+#define json_argument_list_maximum  (524288)
+
+/**
+ * @name json_validation_state_t:
+ */
+typedef enum {
+  START = 0, IN_ROOT_OBJECT, IN_ARGUMENTS_ARRAY, SUCCESS
+} json_validation_state_t;
+
+/**
+ * @name json_validation_errors:
+ */
+static const char *const json_validation_errors[] = {
+  /* 0 */  "success; no error",
+  /* 1 */  "parse error: invalid or malformed JSON",
+  /* 2 */  "parser memory limit exceeded",
+  /* 3 */  "internal error: memory allocation failure",
+  /* 4 */  "internal error: integer value would overflow",
+  /* 5 */  "root entity must be an object",
+  /* 6 */  "property names must be strings",
+  /* 7 */  "object contains one or more incomplete key/value pairs",
+  /* 8 */  "value for the `command` property must be a string",
+  /* 9 */  "value for `arguments` property must be an array",
+  /* 10 */ "arguments must be either strings or numeric values",
+  /* 11 */ "non-string values in `arguments` must be numeric",
+  /* 12 */ "one or more required properties are missing"
+};
+
+/**
+ * @name validation_error_t:
+ */
+typedef enum {
+  V_ERR_NONE = 0, V_ERR_PARSE = 1,
+    V_ERR_MEM_LIMIT = 2, V_ERR_MEM_ALLOC = 3,
+    V_ERR_OVERFLOW = 3, V_ERR_ROOT_TYPE = 5,
+    V_ERR_PROPS_TYPE = 6, V_ERR_PROPS_ODD = 7,
+    V_ERR_CMD_TYPE = 8, V_ERR_ARGS_TYPE = 9,
+    V_ERR_ARG_TYPE = 10, V_ERR_ARGS_NUMERIC = 11,
+    V_ERR_PROPS_MISSING = 12, V_ERR_UNKNOWN = 13
+} validation_error_t;
+
+/**
+ * @name print_json_validation_error:
+ */
+static void print_json_validation_error(validation_error_t err) {
+
+  const char *s = (
+    err < V_ERR_UNKNOWN ?
+      json_validation_errors[err] : "unknown or unhandled error"
+  );
+
+  if (app.repl) {
+    print_repl_error(err, s);
+  } else {
+    fprintf(stderr, "Error: %s.\n", s);
+    fprintf(stderr, "Failure while parsing/validating JSON.\n");
+  }
+}
+
+/**
+ * @name parsed_json_to_arguments:
+ */
+boolean_t parsed_json_to_arguments(parsed_json_t *p,
+                                   int *argc, char **argv[], int *err) {
+
+  int n = 0;
+  char **rv = NULL;
+
+  unsigned int size = 0;
+  jsmntok_t *tokens = p->tokens;
+  json_validation_state_t state = START;
+  boolean_t matched_keys[] = { FALSE, FALSE };
+  unsigned int object_size = 0, array_size = 0;
+
+  #define return_validation_error(e) \
+    do { *err = (e); goto validation_error; } while (0)
+
+  #define token_lookahead(i, c) \
+    (((i) + (c)) < p->nr_tokens && \
+      !jsmn_token_is_invalid(tokens + (i) + (c)) ? \
+        (tokens + (i) + (c)) : NULL)
+
+  /* For every token */
+  for (unsigned int i = 0; i < p->nr_tokens; ++i) {
+
+    jsmntok_t *t = &tokens[i];
+
+    if (matched_keys[0] && matched_keys[1]) {
+      state = SUCCESS;
+      break;
+    }
+
+    if (jsmn_token_is_invalid(t)) {
+      break;
+    }
+
+    if (!size || n >= size) {
+
+      /* Increase size by a few orders of magnitude */
+      size = (size ? size * 8 : json_argument_list_start);
+
+      /* Increase size, then check against memory limit */
+      if (size > json_argument_list_maximum) {
+        return_validation_error(V_ERR_MEM_LIMIT);
+      }
+
+      /* Paranoia: check for overflow */
+      if (multiplication_will_overflow(size, sizeof(char *))) {
+        return_validation_error(V_ERR_OVERFLOW);
+      }
+
+      /* Enlarge array of argument pointers */
+      if (!(rv = (char **) realloc(rv, size * sizeof(char *)))) {
+        return_validation_error(V_ERR_MEM_ALLOC);
+      }
+    }
+
+    switch (state) {
+
+      case START: {
+
+        if (t->type != JSMN_OBJECT) {
+          return_validation_error(V_ERR_ROOT_TYPE);
+        }
+
+        if (t->size % 2 != 0) {
+          return_validation_error(V_ERR_PROPS_ODD);
+        }
+
+        object_size = t->size;
+        state = IN_ROOT_OBJECT;
+
+        break;
+      }
+
+      case IN_ROOT_OBJECT: {
+
+        if (object_size <= 0) {
+          break;
+        }
+
+        if (t->type != JSMN_STRING) {
+          return_validation_error(V_ERR_PROPS_TYPE);
+        }
+
+        char *s = jsmn_stringify_token(p->json, t);
+
+        if (!(t = token_lookahead(i, 1))) {
+          return_validation_error(V_ERR_PROPS_ODD);
+        }
+
+        if (strcmp(s, "command") == 0) {
+
+          if (t->type != JSMN_STRING) {
+            return_validation_error(V_ERR_CMD_TYPE);
+          }
+
+          rv[0] = jsmn_stringify_token(p->json, t);
+          matched_keys[0] = TRUE;
+
+        } else if (strcmp(s, "arguments") == 0) {
+
+          if (t->type != JSMN_ARRAY && t->type != JSMN_OBJECT) {
+            return_validation_error(V_ERR_ARGS_TYPE);
+          }
+
+          /* Handle empty arrays */
+          jsmntok_t *tt = token_lookahead(i, 2);
+
+          if (!tt || t->size <= 0) {
+            matched_keys[1] = TRUE;
+          } else {
+            state = IN_ARGUMENTS_ARRAY;
+          }
+
+          /* Enter array */
+          array_size = t->size;
+        }
+
+        /* To walk the stair / steps in pairs */
+        object_size -= 2;
+        i++;
+
+        break;
+      }
+
+      case IN_ARGUMENTS_ARRAY: {
+
+        if (t->type != JSMN_PRIMITIVE && t->type != JSMN_STRING) {
+          return_validation_error(V_ERR_ARG_TYPE);
+        }
+
+        char *s = jsmn_stringify_token(p->json, t);
+
+        /* Require that primitives are numeric */
+        if (t->type == JSMN_PRIMITIVE && (!s || !isdigit(s[0]))) {
+          return_validation_error(V_ERR_ARGS_NUMERIC);
+        }
+
+        rv[++n] = s;
+
+        if (--array_size <= 0) {
+          matched_keys[1] = TRUE;
+          state = IN_ROOT_OBJECT;
+        }
+
+        break;
+      }
+
+      case SUCCESS: {
+        goto successful;
+      }
+
+      default: {
+        return_validation_error(V_ERR_UNKNOWN);
+        break;
+      }
+    }
+  }
+
+  if (state != SUCCESS) {
+    return_validation_error(V_ERR_PROPS_MISSING);
+  }
+
+  /* Victory */
+  successful:
+
+    /* Null-terminate */
+    rv[n + 2] = NULL;
+
+    /* Return values */
+    *argv = rv;
+    *argc = n + 1;
+
+    /* Success */
+    return TRUE;
+
+  /* Non-victory */
+  validation_error:
+
+    if (rv) {
+      free(rv);
+    }
+
+    return FALSE;
+}
+
+/** --- **/
+
+#define json_parser_tokens_start     (32)
+#define json_parser_tokens_maximum   (32768)
+
+/**
+ * @name print_parsed_json:
+ */
+void print_parsed_json(parsed_json_t *p) {
+
+  fprintf(stderr, "start\n");
+
+  for (unsigned int i = 0; i < p->nr_tokens; ++i) {
+
+    jsmntok_t *t = &p->tokens[i];
+
+    if (jsmn_token_is_invalid(t)) {
+      fprintf(stderr, "end\n");
+      break;
+    }
+    
+    char *s = jsmn_stringify_token(p->json, t);
+
+    switch (t->type) {
+      case JSMN_STRING:
+        fprintf(stderr, "string: '%s'\n", s);
+        break;
+      case JSMN_PRIMITIVE:
+        fprintf(stderr, "primitive: '%s'\n", s);
+        break;
+      case JSMN_OBJECT:
+        fprintf(stderr, "object[%d]\n", t->size);
+        break;
+      case JSMN_ARRAY:
+        fprintf(stderr, "array[%d]\n", t->size);
+        break;
+      default:
+        fprintf(stderr, "unknown-%d[%d]: '%s'\n", t->type, t->size, s);
+        continue;
+    }
+  }
+}
+
+/**
+ * @name parse_json:
+ */
+parsed_json_t *parse_json(char *json) {
+
+  parsed_json_t *rv =
+    (parsed_json_t *) malloc_and_zero(sizeof(parsed_json_t));
+
+  if (!rv) {
+    return NULL;
+  }
+
+  rv->json = json;
+  rv->tokens = NULL;
+  rv->nr_tokens = 0;
+
+  unsigned int n = json_parser_tokens_start;
+
+  for (;;) {
+
+    /* Check against upper limit */
+    if (n > json_parser_tokens_maximum) {
+      goto allocation_error;
+    }
+
+    /* Paranoia: check for overflow */
+    if (multiplication_will_overflow(n, sizeof(jsmntok_t))) {
+      return NULL;
+    }
+
+    jsmn_init(&rv->parser);
+
+    if (!(rv->tokens = realloc(rv->tokens, n * sizeof(jsmntok_t)))) {
+      goto allocation_error;
+    }
+
+    /* Set all tokens to invalid */
+    for (unsigned int i = 0; i < n; ++i) {
+      jsmn_mark_token_invalid(&rv->tokens[i]);
+    }
+
+    /* Parse */
+    jsmnerr_t result =
+      jsmn_parse(&rv->parser, json, rv->tokens, n);
+
+    /* Not enough room to parse the full string?
+     *   Increase the available token space by a couple (base two)
+     *   orders of magnitude, then go around, reallocate, and retry. */
+
+    if (result == JSMN_ERROR_NOMEM) {
+      n *= 4;
+      continue;
+    }
+
+    if (result < 0) {
+      goto allocation_error;
+    }
+
+    /* Parsed successfully */
+    rv->nr_tokens = n;
+    break;
+  }
+
+  /* Success */
+  return rv;
+
+  /* Error:
+   *  Clean up the `rv` structure and its members. */
+
+  allocation_error:
+
+    if (rv->tokens) {
+      free(rv->tokens);
+    }
+
+    free(rv);
+    return NULL;
+}
+
+/**
+ * @name release_parsed_json:
+ */
+void release_parsed_json(parsed_json_t *p) {
+
+  free(p->tokens);
+  free(p);
+}
 
 /** --- **/
 
@@ -207,7 +842,7 @@ transmit_status_t *initialize_transmit_status(transmit_status_t *t) {
   t->message_index = 0;
   t->message_part_index = 0;
 
-  for (int i = 0; i < GSM_MAX_MULTI_SMS; i++) {
+  for (unsigned int i = 0; i < GSM_MAX_MULTI_SMS; i++) {
     t->parts[i].err = NULL;
     t->parts[i].status = 0;
     t->parts[i].reference = 0;
@@ -239,42 +874,14 @@ delete_status_t *initialize_delete_status(delete_status_t *d) {
  */
 app_options_t *initialize_application_options(app_options_t *o) {
 
+  o->help = FALSE;
+  o->repl = FALSE;
   o->invalid = FALSE;
+  o->verbose = FALSE;
   o->application_name = NULL;
   o->gammu_configuration_path = NULL;
 
   return o;
-}
-
-/** --- **/
-
-static app_options_t app; /* global */
-
-/** --- **/
-
-/**
- * @name malloc_and_zero
- */
-static void *malloc_and_zero(int size) {
-
-  void *rv = malloc(size);
-
-  if (!rv) {
-    fprintf(stderr, "Fatal error: failed to allocate %d bytes\n", size);
-    exit(111);
-  }
-
-  memset(rv, '\0', size);
-  return rv;
-}
-
-/**
- * @name usage:
- */
-static int usage() {
-
-  fprintf(stderr, usage_text, app.application_name);
-  return 127;
 }
 
 /**
@@ -332,8 +939,11 @@ void bitfield_destroy(bitfield_t *bf) {
 
 /**
  * @name bitfield_test:
- *   Return true if the one-based bit `bit` is set. Returns true
- *   on success, false if `bit` is out of range for this bitfield.
+ *   Return true if the (zero-based or one-based) bit `bit` is set.
+ *   Returns true on success, false if `bit` is out of range for this
+ *   bitfield. You may use either zero-based addressing or one-based
+ *   addressing, as long as you remain consistent for each instance
+ *   of a bitfield_t.
  */
 boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
 
@@ -349,11 +959,14 @@ boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
 
 /**
  * @name bitfield_set:
- *   Set the one-based bit `bit` to one if `value` is true,
- *   otherwise set the bit to zero. Returns true on success, false
- *   if the bit `bit` is out of range for this particular bitfield.
+ *   Set the (zero-based or one-based) bit `bit` to one if `value` is
+ *   true, otherwise set the bit to zero. Returns true on success, false
+ *   if the bit `bit` is out of range for this particular bitfield.  You
+ *   may use either zero-based addressing or one-based addressing, as
+ *   long as you remain consistent for each instance of a bitfield_t.
  */
-boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t value) {
+boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t
+        value) {
 
   if (bit > bf->n) {
     return FALSE;
@@ -384,11 +997,12 @@ boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t value) {
 /**
  * @name find_maximum_integer_argument:
  */
-unsigned long find_maximum_integer_argument(char *argv[]) {
+boolean_t find_maximum_integer_argument(unsigned long *rv, char *argv[]) {
 
-  unsigned int rv = 0;
+  unsigned long max = 0;
+  boolean_t found = FALSE;
 
-  for (int i = 0; argv[i] != NULL; i++) {
+  for (unsigned int i = 0; argv[i] != NULL; i++) {
 
     char *err = NULL;
     unsigned long n = strtoul(argv[i], &err, 10);
@@ -397,12 +1011,14 @@ unsigned long find_maximum_integer_argument(char *argv[]) {
       continue;
     }
 
-    if (n > 0 && n > rv) {
-      rv = n;
+    if (n > max) {
+      max = n;
+      found = TRUE;
     }
   }
 
-  return rv;
+  *rv = max;
+  return found;
 }
 
 /**
@@ -410,7 +1026,7 @@ unsigned long find_maximum_integer_argument(char *argv[]) {
  */
 boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
 
-  for (int i = 0; argv[i] != NULL; i++) {
+  for (unsigned int i = 0; argv[i] != NULL; i++) {
 
     char *err = NULL;
     unsigned long n = strtoul(argv[i], &err, 10);
@@ -437,7 +1053,7 @@ boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
  */
 char *ucs2_encode_json_utf8(const unsigned char *s) {
 
-  int i, j = 0;
+  unsigned int i, j = 0;
   int ul = UnicodeLength(s);
 
   /* Worst-case UCS-2 string allocation:
@@ -502,6 +1118,10 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
 
   int n = TIMESTAMP_MAX_WIDTH;
   char *rv = (char *) malloc_and_zero(n);
+
+  #ifdef _WIN32
+    #pragma warning(disable: 4996)
+  #endif
 
   snprintf(
     rv, n, "%.4d-%.2d-%.2d %.2d:%.2d:%.2d",
@@ -587,7 +1207,7 @@ boolean_t ucs2_is_gsm_string(const unsigned char *s) {
 
   int ul = UnicodeLength(s);
 
-  for (int i = 0; i < ul; ++i) {
+  for (unsigned int i = 0; i < ul; ++i) {
     if (!ucs2_is_gsm_codepoint(s[2 * i], s[2 * i + 1])) {
       return FALSE;
     }
@@ -667,6 +1287,20 @@ gammu_state_t *gammu_create_if_necessary(gammu_state_t **sp) {
     return NULL;
   }
 
+  if (app.verbose) {
+
+    /* Enable global debugging to stderr */
+    GSM_Debug_Info *debug_info = GSM_GetGlobalDebug();
+    GSM_SetDebugFileDescriptor(stderr, TRUE, debug_info);
+    GSM_SetDebugLevel("textall", debug_info);
+
+    /* Enable state machine debugging to stderr */
+    debug_info = GSM_GetDebug(rv->sm);
+    GSM_SetDebugGlobal(FALSE, debug_info);
+    GSM_SetDebugFileDescriptor(stderr, TRUE, debug_info);
+    GSM_SetDebugLevel("textall", debug_info);
+  }
+
   *sp = rv;
   return rv;
 }
@@ -731,7 +1365,7 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     printf(", ");
   }
 
-  for (int i = 0; i < sms->Number; i++) {
+  for (unsigned int i = 0; i < sms->Number; i++) {
 
     printf("{");
 
@@ -844,12 +1478,12 @@ int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    fprintf(stderr, "Error: failed to start gammu; check configuration\n");
+    print_operation_error(OP_ERR_INIT);
     rv = 1; goto cleanup;
   }
 
   if (!print_messages_json_utf8(s)) {
-    fprintf(stderr, "Error: failed to retrieve one or more messages\n");
+    print_operation_error(OP_ERR_RETRIEVE);
     rv = 2; goto cleanup;
   }
 
@@ -864,7 +1498,7 @@ int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
  */
 void print_deletion_detail_json_utf8(message_t *sms,
                                      delete_stage_t r,
-				     boolean_t is_start) {
+                                     boolean_t is_start) {
   if (!is_start) {
     printf(", ");
   }
@@ -965,7 +1599,7 @@ boolean_t delete_multimessage(gammu_state_t *s,
                               delete_callback_fn_t callback, void *x) {
   int rv = TRUE;
 
-  for (int i = 0; i < sms->Number; i++) {
+  for (unsigned int i = 0; i < sms->Number; i++) {
 
     message_t *m = &sms->SMS[i];
 
@@ -1003,8 +1637,8 @@ boolean_t delete_multimessage(gammu_state_t *s,
 /**
  * @name _after_deletion_callback:
  */
-void _after_deletion_callback(gammu_state_t *s,
-                              message_t *sms, delete_stage_t r, void *x) {
+static void _after_deletion_callback(gammu_state_t *s, message_t *sms,
+                                     delete_stage_t r, void *x) {
 
   delete_status_t *status = (delete_status_t *) x;
 
@@ -1020,9 +1654,9 @@ void _after_deletion_callback(gammu_state_t *s,
 /**
  * @name _before_deletion_callback:
  */
-boolean_t _before_deletion_callback(gammu_state_t *s,
-                                    multimessage_t *sms,
-                                    boolean_t is_start, void *x) {
+static boolean_t _before_deletion_callback(gammu_state_t *s,
+                                           multimessage_t *sms,
+                                           boolean_t is_start, void *x) {
 
   delete_status_t *status = (delete_status_t *) x;
 
@@ -1060,8 +1694,6 @@ boolean_t delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
   return rv;
 }
 
-/** --- **/
-
 /**
  * @name action_delete_messages:
  */
@@ -1071,8 +1703,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   bitfield_t *bf = NULL;
 
   if (argc < 2) {
-    usage();
-    fprintf(stderr, "Error: deletion location(s) must be specified\n");
+    print_usage_error(U_ERR_LOC_MISSING);
     return 1;
   }
 
@@ -1080,27 +1711,28 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   if (!delete_all) {
 
-    unsigned long n = find_maximum_integer_argument(&argv[1]);
+    unsigned long n;
+    boolean_t found = find_maximum_integer_argument(&n, &argv[1]);
 
-    if (!n) {
-      fprintf(stderr, "Error: no valid location(s) specified\n");
+    if (!found) {
+      print_usage_error(U_ERR_LOC_INVAL);
       rv = 2; goto cleanup;
     }
 
     if (n == ULONG_MAX && errno == ERANGE) {
-      fprintf(stderr, "Error: integer argument would overflow\n");
+      print_usage_error(U_ERR_OVERFLOW);
       rv = 3; goto cleanup;
     }
 
     bf = bitfield_create(n);
 
     if (!bf) {
-      fprintf(stderr, "Error: failed to create deletion index\n");
+      print_operation_error(OP_ERR_INDEX);
       rv = 4; goto cleanup_delete;
     }
 
     if (!bitfield_set_integer_arguments(bf, &argv[1])) {
-      fprintf(stderr, "Error: one or more location(s) are invalid\n");
+      print_operation_error(OP_ERR_LOCATION);
       rv = 5; goto cleanup_delete;
     }
   }
@@ -1108,14 +1740,14 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    fprintf(stderr, "Error: failed to initialize gammu\n");
+    print_operation_error(OP_ERR_INIT);
     rv = 6; goto cleanup_delete;
   }
 
   printf("{");
 
   if (!delete_selected_messages(s, bf)) {
-    fprintf(stderr, "Error: failed to delete one or more messages\n");
+    print_operation_error(OP_ERR_DELETE);
     rv = 7; goto cleanup_json;
   }
 
@@ -1170,7 +1802,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
     printf("\"parts\": [");
 
     /* Per-part information */
-    for (int i = 0; i < t->parts_total; i++) {
+    for (unsigned int i = 0; i < t->parts_total; i++) {
 
       if (i != 0) {
         printf(", ");
@@ -1229,14 +1861,12 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   char **argp = &argv[1];
 
   if (argc <= 2) {
-    usage();
-    fprintf(stderr, "Error: Not enough arguments provided\n");
+    print_usage_error(U_ERR_ARGS_MISSING);
     return 1;
   }
 
   if (argc % 2 != 1) {
-    usage();
-    fprintf(stderr, "Error: Odd number of arguments provided\n");
+    print_usage_error(U_ERR_ARGS_ODD);
     return 2;
   }
 
@@ -1254,7 +1884,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
-    fprintf(stderr, "Error: Failed to start gammu subsystem\n");
+    print_operation_error(OP_ERR_INIT);
     rv = 3; goto cleanup;
   }
 
@@ -1262,7 +1892,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   smsc->Location = 1;
 
   if ((s->err = GSM_GetSMSC(s->sm, smsc)) != ERR_NONE) {
-    fprintf(stderr, "Error: Failed to discover SMSC number\n");
+    print_operation_error(OP_ERR_SMSC);
     rv = 4; goto cleanup_sms;
   }
 
@@ -1338,7 +1968,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     status.parts_total = sms->Number;
 
     /* For each SMS part... */
-    for (int i = 0; i < sms->Number; i++) {
+    for (unsigned int i = 0; i < sms->Number; i++) {
 
       status.finished = FALSE;
       status.message_part_index = i;
@@ -1387,13 +2017,13 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     free(sms);
     free(smsc);
     free(info);
-
-  cleanup_json:
     printf("]\n");
   
   cleanup:
     return rv;
 }
+
+/** --- **/
 
 /**
  * @name parse_global_arguments:
@@ -1406,16 +2036,16 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
   while (*argp != NULL) {
 
     if (strcmp(*argp, "-h") == 0 || strcmp(*argp, "--help") == 0) {
-      o->invalid = TRUE;
+      o->help = TRUE;
       break;
     }
 
     if (strcmp(*argp, "-c") == 0 || strcmp(*argp, "--config") == 0) {
 
       if (*++argp == NULL) {
-	fprintf(stderr, "Error: no configuration file name provided\n");
-	o->invalid = TRUE;
-	break;
+        print_usage_error(U_ERR_CONFIG_MISSING);
+        o->invalid = TRUE;
+        break;
       }
 
       o->gammu_configuration_path = *argp++;
@@ -1424,10 +2054,130 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
       continue;
     }
 
+    if (strcmp(*argp, "-v") == 0 || strcmp(*argp, "--verbose") == 0) {
+      o->verbose = TRUE;
+      ++argp; ++rv;
+      continue;
+    }
+
+    if (strcmp(*argp, "-r") == 0 || strcmp(*argp, "--repl") == 0) {
+
+      o->repl = TRUE;
+      ++argp; ++rv;
+
+      /* FIXME: Remove this when REPL mode is stable */
+      fprintf(stderr, "Warning: -r/--repl is experimental code\n");
+
+      continue;
+    }
+
     break;
   }
 
   return rv;
+}
+
+/**
+ * @name process_command:
+ *   Execute a command, based upon the arguments provided.
+ *   The `argv[0]` argument should contain a single command
+ *   (currently either `send`, `retrieve`, or `delete`); the
+ *   remaining items in `argv` are parameters to be provided to
+ *   the specified command. Return `true` if a command was
+ *   executed (whether successfully or resulting in an error),
+ *   or `false` if the command specified was not found.
+ */
+boolean_t process_command(gammu_state_t *s,
+                          int argc, char *argv[], int *rv) {
+
+  *rv = 0;
+
+  /* Option #1:
+   *   Retrieve all messages as a JSON array. */
+
+  if (argc > 0 && strcmp(argv[0], "retrieve") == 0) {
+    *rv = action_retrieve_messages(&s, argc, argv);
+    return TRUE;
+  }
+
+  /* Option #2:
+   *   Delete messages specified in `argv` (or all messages). */
+
+  if (argc > 0 && strcmp(argv[0], "delete") == 0) {
+    *rv = action_delete_messages(&s, argc, argv);
+    return TRUE;
+  }
+
+  /* Option #3:
+   *   Send one or more messages, each to a single recipient. */
+
+  if (argc > 0 && strcmp(argv[0], "send") == 0) {
+    *rv = action_send_messages(&s, argc, argv);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+/**
+ * @name process_repl_commands:
+ */
+void process_repl_commands(gammu_state_t *s, FILE *stream) {
+
+  for (;;) {
+
+    boolean_t is_eof = FALSE;
+    char *line = read_line(stream, &is_eof);
+
+    if (!line) {
+      break;
+    }
+
+    if (is_eof && line[0] == '\0') {
+      return;
+    }
+
+    parsed_json_t *p = parse_json(line);
+
+    if (p) {
+
+      char **argv = NULL;
+      int argc = 0, err = 0;
+
+      boolean_t rv =
+        parsed_json_to_arguments(p, &argc, &argv, &err);
+
+      if (!rv) {
+        print_json_validation_error(err);
+        goto cleanup_json;
+      }
+
+      int result = 0;
+
+      if (!process_command(s, argc, argv, &result)) {
+
+        if (!result) {
+          print_usage_error(U_ERR_CMD_INVAL);
+        }
+        goto cleanup_json;
+      }
+
+    } else {
+      print_json_validation_error(V_ERR_PARSE);
+    }
+
+    cleanup_json:
+
+      if (p) {
+        release_parsed_json(p);
+      }
+
+      free(line);
+
+      if (is_eof) {
+        break;
+      }
+  }
 }
 
 /**
@@ -1447,54 +2197,47 @@ int main(int argc, char *argv[]) {
   int n = parse_global_arguments(argc, argp, &app);
 
   if (app.invalid) {
+    print_usage_error(U_ERR_ARGS_INVAL);
+    goto cleanup;
+  }
+  
+  if (app.help) {
     usage();
-    fprintf(stderr, "Error: one or more invalid argument(s) provided\n");
     goto cleanup;
   }
 
   argc -= n;
   argp += n;
 
-  if (argc < 1) {
-    usage();
-    fprintf(stderr, "Error: no command specified\n");
+  /* Execute command:
+   *   This runs the operation provided via command-line arguments. */
+
+  if (argc > 0) {
+    if (!process_command(s, argc, argp, &rv)) {
+      print_usage_error(U_ERR_CMD_INVAL);
+    }
+  } else if (!app.repl) {
+    print_usage_error(U_ERR_CMD_MISSING);
     goto cleanup;
   }
 
-  /* Option #1:
-   *   Retrieve all messages as a JSON array. */
+  /* Read, execute, print loop:
+   *  Repeatedly read lines of JSON from standard input, parse
+   *  them in to command/arguments tuples, dispatch these tuples
+   *  to `process_command`, and repeat until reaching end-of-file. */
 
-  if (strcmp(argp[0], "retrieve") == 0) {
-    rv = action_retrieve_messages(&s, argc, argp);
-    goto cleanup;
+  if (app.repl) {
+    process_repl_commands(s, stdin);
   }
-
-  /* Option #2:
-   *   Delete messages specified in `argv` (or all messages). */
-
-  if (strcmp(argp[0], "delete") == 0) {
-    rv = action_delete_messages(&s, argc, argp);
-    goto cleanup;
-  }
-
-  /* Option #3:
-   *   Send one or more messages, each to a single recipient. */
-
-  if (strcmp(argp[0], "send") == 0) {
-    rv = action_send_messages(&s, argc, argp);
-    goto cleanup;
-  }
-
-  /* No other valid options:
-   *  Display message and usage information. */
-
-  rv = usage();
-  fprintf(stderr, "Error: invalid action specified\n");
 
   cleanup:
+
     if (s) {
       gammu_destroy(s);
     }
+
     return rv;
 }
+
+/* vim: set ts=4 sts=2 sw=2 expandtab: */
 
