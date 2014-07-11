@@ -2,7 +2,7 @@
 C99 = -std=c99
 
 LDFLAGS := -lm
-CFLAGS := -Wall -Os -g
+CFLAGS := -D_FORTIFY_SOURCE=2 -Wall -Os -g
 
 PREFIX ?= /usr
 PKG_CONFIG_PATH = ${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig

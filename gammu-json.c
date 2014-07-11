@@ -1011,7 +1011,7 @@ boolean_t find_maximum_integer_argument(unsigned long *rv, char *argv[]) {
       continue;
     }
 
-    if (n > max) {
+    if (n >= max) {
       max = n;
       found = TRUE;
     }
