@@ -1,8 +1,8 @@
 /**
  * gammu-json
  *
- * Copyright (c) 2013 David Brown <hello at scri.pt>.
- * Copyright (c) 2013 Medic Mobile, Inc. <david at medicmobile.org>
+ * Copyright (c) 2013-2014 David Brown <hello at scri.pt>.
+ * Copyright (c) 2013-2014 Medic Mobile, Inc. <david at medicmobile.org>
  *
  * All rights reserved.
  *
@@ -45,8 +45,45 @@
 #include <gammu.h>
 #include <jsmn.h>
 
-#define TIMESTAMP_MAX_WIDTH (64)
-#define BITFIELD_CELL_WIDTH (CHAR_BIT)
+#include "gammu-json.h"
+
+/** --- **/
+
+#define timestamp_max_width (64)
+#define bitfield_cell_width (CHAR_BIT)
+
+#define read_line_size_start   (1024)
+#define read_line_size_maximum (4194304)
+
+#define json_argument_list_start    (128)
+#define json_argument_list_maximum  (524288)
+
+/** --- **/
+
+#define print_stderr(prefix, ...) \
+  do { \
+    fprintf(stderr, "%s: ", prefix); \
+    fprintf(stderr, ##__VA_ARGS__); \
+    fprintf(stderr, "\n"); \
+  } while (0)
+
+#define fatal(exit_status, ...) \
+  do { \
+    print_stderr("Fatal", ##__VA_ARGS__); \
+    exit(exit_status); \
+  } while (0)
+
+#define warn(...) \
+  do { \
+    print_stderr("Warning", ##__VA_ARGS__); \
+  } while (0)
+
+#define debug(...) \
+  do { \
+    print_stderr("Debug", ##__VA_ARGS__); \
+  } while (0)
+
+/** --- **/
 
 const static char *usage_text = (
   "\n"
@@ -89,175 +126,13 @@ const static char *usage_text = (
   "                            messages on stdout.\n"
   "About:\n"
   "\n"
-  "  Copyright (c) 2013 David Brown <hello at scri.pt>.\n"
-  "  Copyright (c) 2013 Medic Mobile, Inc. <david at medicmobile.org>\n"
+  "  Copyright (c) 2013-2014 David Brown <hello at scri.pt>.\n"
+  "  Copyright (c) 2013-2014 Medic Mobile, Inc. <david at medicmobile.org>\n"
   "\n"
   "  Released under the GNU General Public License, version three.\n"
   "  For more information, see <http://github.com/browndav/gammu-json>.\n"
   "\n"
 );
-
-/**
- * @name boolean_t:
- */
-typedef uint8_t boolean_t;
-
-/**
- * @name gammu_state_t:
- */
-typedef struct app_options {
-
-  boolean_t help;
-  boolean_t repl;
-  boolean_t invalid;
-  boolean_t verbose;
-  char *application_name;
-  char *gammu_configuration_path;
-
-} app_options_t;
-
-/**
- * @name gammu_state_t:
- */
-typedef struct gammu_state {
-
-  int err;
-  GSM_StateMachine *sm;
-
-} gammu_state_t;
-
-/**
- * @name multimessage_t:
- */
-typedef GSM_SMSMessage message_t;
-
-/**
- * @name multimessage_t:
- */
-typedef GSM_MultiSMSMessage multimessage_t;
-
-/**
- * @name multimessage_info_t:
- */
-typedef GSM_MultiPartSMSInfo multimessage_info_t;
-
-/**
- * @name message_timestamp_t:
- */
-typedef GSM_DateTime message_timestamp_t;
-
-/**
- * @name smsc_t:
- */
-typedef GSM_SMSC smsc_t;
-
-/**
- * @name message_iterate_fn_t:
- */
-typedef boolean_t (*message_iterate_fn_t)(
-  gammu_state_t *, multimessage_t *, boolean_t, void *
-);
-
-/**
- * @name bitfield_t:
- */
-typedef struct bitfield {
-
-  uint8_t *data;
-  unsigned int n;
-  unsigned int total_set;
-
-} bitfield_t;
-
-/**
- * @name utf8_info_t:
- */
-typedef struct utf8_length_info {
-
-  unsigned int bytes;
-  unsigned int symbols;
-
-} utf8_length_info_t;
-
-/**
- * @name part_transmit_status_t:
- */
-typedef struct part_transmit_status {
-
-  int status;
-  int reference;
-  const char *err;
-  boolean_t transmitted;
-
-} part_transmit_status_t;
-
-/**
- * @name transmit_status_t:
- */
-typedef struct transmit_status {
-
-  const char *err;
-  boolean_t finished;
-
-  int parts_sent;
-  int parts_total;
-  int message_index;
-  int message_part_index;
-  part_transmit_status_t parts[GSM_MAX_MULTI_SMS];
-
-} transmit_status_t;
-
-/**
- * @name delete_status_t:
- */
-typedef struct delete_status {
-
-  boolean_t is_start;
-  bitfield_t *bitfield;
-
-  unsigned int requested;
-  unsigned int examined;
-  unsigned int skipped;
-  unsigned int attempted;
-  unsigned int errors;
-  unsigned int deleted;
-
-} delete_status_t;
-
-/**
- * @name delete_stage_t:
- */
-typedef enum {
-
-  DELETE_EXAMINING = 1,
-  DELETE_ATTEMPTING,
-  DELETE_RESULT_BARRIER = 32,
-  DELETE_SUCCESS,
-  DELETE_SKIPPED,
-  DELETE_ERROR
-
-} delete_stage_t;
-
-/**
- * @name delete_stage_t:
- */
-typedef struct parsed_json {
-
-  char *json;
-  jsmn_parser parser;
-  jsmntok_t *tokens;
-  unsigned int nr_tokens;
-
-} parsed_json_t;
-
-
-/**
- * @name delete_callback_fn_t:
- */
-typedef void (*delete_callback_fn_t)(
-  gammu_state_t *, message_t *, delete_stage_t, void *
-);
-
 /** --- **/
 
 /**
@@ -275,16 +150,6 @@ static const char *const operation_errors[] = {
 };
 
 /**
- * @name operation_error_t:
- */
-typedef enum {
-  OP_ERR_NONE = 0, OP_ERR_INIT = 1,
-    OP_ERR_SMSC = 2, OP_ERR_RETRIEVE = 3,
-    OP_ERR_LOCATION = 4, OP_ERR_INDEX = 5,
-    OP_ERR_DELETE = 6, OP_ERR_JSON = 7, OP_ERR_UNKNOWN = 8
-} operation_error_t;
-
-/**
  * @name usage_errors:
  */
 static const char *const usage_errors[] = {
@@ -300,53 +165,130 @@ static const char *const usage_errors[] = {
   /* 9 */  "integer argument would overflow"
 };
 
-/**
- * @name usage_error_t:
- */
-typedef enum {
-  U_ERR_NONE = 0, U_ERR_ARGS_MISSING = 1,
-    U_ERR_ARGS_ODD = 2, U_ERR_CONFIG_MISSING = 3,
-    U_ERR_ARGS_INVAL = 4, U_ERR_CMD_INVAL = 5,
-    U_ERR_CMD_MISSING = 6, U_ERR_LOC_MISSING = 7,
-    U_ERR_LOC_INVAL = 8, U_ERR_OVERFLOW = 9, U_ERR_UNKNOWN = 10
-} usage_error_t;
-
-
 /** --- **/
 
 static app_options_t app; /* global */
 
 /** --- **/
 
-int multiplication_will_overflow(size_t n, size_t s) {
+/**
+ * @name addition_will_overflow:
+ */
+int addition_will_overflow(size_t a, size_t b) {
 
-  return (((size_t) -1 / s) < n);
+  return (((size_t) -1 - a) < b);
 }
 
 /**
- * @name malloc_and_zero
+ * @name multiplication_will_overflow:
  */
-static void *malloc_and_zero(int size) {
+int multiplication_will_overflow(size_t a, size_t b) {
+
+  if (a == 0 || b == 0) {
+    return FALSE;
+  }
+
+  return (((size_t) -1 / b) < a);
+}
+
+/**
+ * @name allocate:
+ */
+static void *allocate(size_t size) {
 
   void *rv = malloc(size);
 
   if (!rv) {
-    fprintf(stderr, "Fatal error: failed to allocate %d bytes\n", size);
-    exit(111);
+    fatal(127, "allocation failure; couldn't allocate %lu bytes", size);
   }
 
-  memset(rv, '\0', size);
   return rv;
 }
 
-#define line_size_start    (1024)
-#define line_size_maximum  (4194304)
+/**
+ * @name allocate_array:
+ */
+static void *allocate_array(size_t size, size_t items, size_t extra) {
+
+  const char *multiplication_message =
+    "allocation failure; multiplication would overflow (%lu * %lu)";
+
+  const char *addition_message =
+    "allocation failure; addition would overflow (%lu + %lu)";
+
+  if (multiplication_will_overflow(size, items)) {
+    fatal(126, multiplication_message, size, items);
+  }
+  
+  if (multiplication_will_overflow(size, extra)) {
+    fatal(125, multiplication_message, size, extra);
+  }
+
+  items *= size;
+  extra *= size;
+
+  if (addition_will_overflow(items, extra)) {
+    fatal(124, addition_message, items, extra);
+  }
+
+  return allocate(items + extra);
+}
+
+/**
+ * @name reallocate:
+ */
+static void *reallocate(void *p, size_t size) {
+
+  void *rv = realloc(p, size);
+
+  if (!rv) {
+    warn("reallocation failure; couldn't enlarge region to %lu bytes", size);
+    return NULL;
+  }
+
+  return rv;
+}
+
+/**
+ * @name reallocate_array:
+ */
+static void *reallocate_array(void *p, size_t size,
+                              size_t items, size_t extra) {
+
+  const char *multiplication_message =
+    "reallocation failure; multiplication would overflow (%lu * %lu)";
+
+  const char *addition_message =
+    "reallocation failure; addition would overflow (%lu * %lu)";
+
+  if (multiplication_will_overflow(size, items)) {
+    warn(multiplication_message, size, items);
+    return NULL;
+  }
+
+  if (multiplication_will_overflow(size, extra)) {
+    warn(multiplication_message, size, extra);
+    return NULL;
+  }
+
+  items *= size;
+  extra *= size;
+
+  if (addition_will_overflow(items, extra)) {
+    warn(addition_message, items, extra);
+    return NULL;
+  }
+
+  return reallocate(p, items + extra);
+}
+
+/** --- **/
 
 /**
  * @name read_line:
  *   Read a line portably, relying only upon the C library's
  *   `getc` standard I/O function. This should work on any
- *   platform that has a standard I/O (stdio)  implementation.
+ *   platform that has a standard I/O (stdio) implementation.
  */
 char *read_line(FILE *stream, boolean_t *eof) {
 
@@ -358,9 +300,13 @@ char *read_line(FILE *stream, boolean_t *eof) {
   for (;;) {
 
     if (!size || i >= size) {
-      size = (size ? size * 8 : line_size_start);
-
-      if (!(rv = (char *) realloc(rv, size + 1))) {
+      size = (
+        (size ? size * 8 : read_line_size_start)
+      );
+      if (size >= read_line_size_maximum) {
+        goto allocation_error;
+      }
+      if (!(rv = (char *) reallocate_array(rv, sizeof(char), size, 1))) {
         goto allocation_error;
       }
     }
@@ -388,6 +334,8 @@ char *read_line(FILE *stream, boolean_t *eof) {
 
     return NULL;
 }
+
+/* --- */
 
 /**
  * @name usage:
@@ -448,16 +396,6 @@ static void print_operation_error(operation_error_t err) {
 
 /* --- */
 
-#define json_argument_list_start    (128)
-#define json_argument_list_maximum  (524288)
-
-/**
- * @name json_validation_state_t:
- */
-typedef enum {
-  START = 0, IN_ROOT_OBJECT, IN_ARGUMENTS_ARRAY, SUCCESS
-} json_validation_state_t;
-
 /**
  * @name json_validation_errors:
  */
@@ -478,19 +416,6 @@ static const char *const json_validation_errors[] = {
 };
 
 /**
- * @name validation_error_t:
- */
-typedef enum {
-  V_ERR_NONE = 0, V_ERR_PARSE = 1,
-    V_ERR_MEM_LIMIT = 2, V_ERR_MEM_ALLOC = 3,
-    V_ERR_OVERFLOW = 3, V_ERR_ROOT_TYPE = 5,
-    V_ERR_PROPS_TYPE = 6, V_ERR_PROPS_ODD = 7,
-    V_ERR_CMD_TYPE = 8, V_ERR_ARGS_TYPE = 9,
-    V_ERR_ARG_TYPE = 10, V_ERR_ARGS_NUMERIC = 11,
-    V_ERR_PROPS_MISSING = 12, V_ERR_UNKNOWN = 13
-} validation_error_t;
-
-/**
  * @name print_json_validation_error:
  */
 static void print_json_validation_error(validation_error_t err) {
@@ -507,6 +432,8 @@ static void print_json_validation_error(validation_error_t err) {
     fprintf(stderr, "Failure while parsing/validating JSON.\n");
   }
 }
+
+/* --- */
 
 /**
  * @name parsed_json_to_arguments:
@@ -555,13 +482,8 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
         return_validation_error(V_ERR_MEM_LIMIT);
       }
 
-      /* Paranoia: check for overflow */
-      if (multiplication_will_overflow(size, sizeof(char *))) {
-        return_validation_error(V_ERR_OVERFLOW);
-      }
-
       /* Enlarge array of argument pointers */
-      if (!(rv = (char **) realloc(rv, size * sizeof(char *)))) {
+      if (!(rv = (char **) reallocate_array(rv, sizeof(char *), size, 1))) {
         return_validation_error(V_ERR_MEM_ALLOC);
       }
     }
@@ -706,14 +628,14 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
  */
 void print_parsed_json(parsed_json_t *p) {
 
-  fprintf(stderr, "start\n");
+  debug("start\n");
 
   for (unsigned int i = 0; i < p->nr_tokens; ++i) {
 
     jsmntok_t *t = &p->tokens[i];
 
     if (jsmn_token_is_invalid(t)) {
-      fprintf(stderr, "end\n");
+      debug("end\n");
       break;
     }
     
@@ -721,19 +643,19 @@ void print_parsed_json(parsed_json_t *p) {
 
     switch (t->type) {
       case JSMN_STRING:
-        fprintf(stderr, "string: '%s'\n", s);
+        debug("string: '%s'\n", s);
         break;
       case JSMN_PRIMITIVE:
-        fprintf(stderr, "primitive: '%s'\n", s);
+        debug("primitive: '%s'\n", s);
         break;
       case JSMN_OBJECT:
-        fprintf(stderr, "object[%d]\n", t->size);
+        debug("object[%d]\n", t->size);
         break;
       case JSMN_ARRAY:
-        fprintf(stderr, "array[%d]\n", t->size);
+        debug("array[%d]\n", t->size);
         break;
       default:
-        fprintf(stderr, "unknown-%d[%d]: '%s'\n", t->type, t->size, s);
+        debug("unknown-%d[%d]: '%s'\n", t->type, t->size, s);
         continue;
     }
   }
@@ -745,7 +667,7 @@ void print_parsed_json(parsed_json_t *p) {
 parsed_json_t *parse_json(char *json) {
 
   parsed_json_t *rv =
-    (parsed_json_t *) malloc_and_zero(sizeof(parsed_json_t));
+    (parsed_json_t *) allocate(sizeof(parsed_json_t));
 
   if (!rv) {
     return NULL;
@@ -764,14 +686,12 @@ parsed_json_t *parse_json(char *json) {
       goto allocation_error;
     }
 
-    /* Paranoia: check for overflow */
-    if (multiplication_will_overflow(n, sizeof(jsmntok_t))) {
-      return NULL;
-    }
-
     jsmn_init(&rv->parser);
 
-    if (!(rv->tokens = realloc(rv->tokens, n * sizeof(jsmntok_t)))) {
+    rv->tokens =
+      reallocate_array(rv->tokens, sizeof(jsmntok_t), n, 0);
+
+    if (!rv->tokens) {
       goto allocation_error;
     }
 
@@ -913,17 +833,17 @@ utf8_length_info_t *utf8_string_length(const char *str,
 bitfield_t *bitfield_create(unsigned int bits) {
 
   unsigned int size = bits + 1; /* One-based */
-  unsigned int cells = (size / BITFIELD_CELL_WIDTH);
+  unsigned int cells = (size / bitfield_cell_width);
 
-  bitfield_t *rv = (bitfield_t *) malloc_and_zero(sizeof(*rv));
+  bitfield_t *rv = (bitfield_t *) allocate(sizeof(*rv));
 
-  if (size % BITFIELD_CELL_WIDTH) {
+  if (size % bitfield_cell_width) {
     cells++;
   }
 
   rv->n = bits;
   rv->total_set = 0;
-  rv->data = (uint8_t *) calloc(cells, BITFIELD_CELL_WIDTH);
+  rv->data = (uint8_t *) calloc(cells, bitfield_cell_width);
 
   return rv;
 }
@@ -951,8 +871,8 @@ boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
     return FALSE;
   }
 
-  unsigned long cell = (bit / BITFIELD_CELL_WIDTH);
-  unsigned long offset = (bit % BITFIELD_CELL_WIDTH);
+  unsigned long cell = (bit / bitfield_cell_width);
+  unsigned long offset = (bit % bitfield_cell_width);
 
   return (bf->data[cell] & (1 << offset));
 }
@@ -972,8 +892,8 @@ boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t
     return FALSE;
   }
 
-  unsigned long cell = (bit / BITFIELD_CELL_WIDTH);
-  unsigned long offset = (bit % BITFIELD_CELL_WIDTH);
+  unsigned long cell = (bit / bitfield_cell_width);
+  unsigned long offset = (bit % bitfield_cell_width);
 
   int prev_value = (
     (bf->data[cell] & (1 << offset)) != 0
@@ -1061,7 +981,7 @@ char *ucs2_encode_json_utf8(const unsigned char *s) {
    *  character; every character escaped with a UCS-2 backslash. */
 
   unsigned char *b =
-    (unsigned char *) malloc_and_zero((ul + 1) * 2 * 2);
+    (unsigned char *) allocate_array(2 * 2, ul, 1);
 
   for (i = 0; i < ul; ++i) {
     unsigned char msb = s[2 * i], lsb = s[2 * i + 1];
@@ -1101,9 +1021,9 @@ char *ucs2_encode_json_utf8(const unsigned char *s) {
   b[j++] = '\0';
 
   /* Worst-case UTF-8:
-   *  Four bytes per character (see RFC3629); 1-byte null terminator. */
+   *  Four bytes per character (see RFC3629) plus null terminator. */
 
-  char *rv = (char *) malloc_and_zero(4 * UnicodeLength(b) + 1);
+  char *rv = (char *) allocate_array(4, UnicodeLength(b), 1);
 
   EncodeUTF8(rv, b);
   free(b);
@@ -1116,8 +1036,8 @@ char *ucs2_encode_json_utf8(const unsigned char *s) {
  */
 char *encode_timestamp_utf8(message_timestamp_t *t) {
 
-  int n = TIMESTAMP_MAX_WIDTH;
-  char *rv = (char *) malloc_and_zero(n);
+  int n = timestamp_max_width;
+  char *rv = (char *) allocate(n);
 
   #ifdef _WIN32
     #pragma warning(disable: 4996)
@@ -1235,39 +1155,36 @@ boolean_t is_empty_timestamp(message_timestamp_t *t) {
 gammu_state_t *gammu_create(const char *config_path) {
 
   gammu_state_t *s =
-    (gammu_state_t *) malloc_and_zero(sizeof(*s));
-
-  if (!s) {
-    return NULL;
-  }
+    (gammu_state_t *) allocate(sizeof(*s));
 
   INI_Section *ini;
   GSM_InitLocales(NULL);
 
-  s->err = ERR_NONE;
-  s->sm = GSM_AllocStateMachine();
-
   if ((s->err = GSM_FindGammuRC(&ini, config_path)) != ERR_NONE) {
-    goto failure;
+    goto cleanup;
   }
 
+  s->sm = GSM_AllocStateMachine();
   GSM_Config *cfg = GSM_GetConfig(s->sm, 0);
 
   if ((s->err = GSM_ReadConfig(ini, cfg, 0)) != ERR_NONE) {
-    goto failure;
+    goto cleanup_state;
   }
 
   INI_Free(ini);
   GSM_SetConfigNum(s->sm, 1);
 
   if ((s->err = GSM_InitConnection(s->sm, 1)) != ERR_NONE) {
-    goto failure;
+    goto cleanup_state;
   }
 
   /* Success */
   return s;
 
-  failure:
+  cleanup_state:
+    GSM_FreeStateMachine(s->sm);
+  
+  cleanup:
     free(s);
     return NULL;
 }
@@ -1327,7 +1244,7 @@ boolean_t for_each_message(gammu_state_t *s,
   boolean_t start = TRUE;
 
   multimessage_t *sms =
-    (multimessage_t *) malloc_and_zero(sizeof(*sms));
+    (multimessage_t *) allocate(sizeof(*sms));
 
   for (;;) {
 
@@ -1475,6 +1392,8 @@ int print_messages_json_utf8(gammu_state_t *s) {
 int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   int rv = 0;
+  
+  /* Lazy initialization of libgammu */
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
@@ -1585,7 +1504,7 @@ void add_deletion_result_to_status(delete_stage_t result,
       break;
     default:
     case DELETE_RESULT_BARRIER:
-      fprintf(stderr, "Unhandled deletion result '%d'\n", result);
+      fatal(123, "unhandled deletion result %d", result);
       break;
   }
 }
@@ -1737,6 +1656,7 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
     }
   }
 
+  /* Lazy initialization of libgammu */
   gammu_state_t *s = gammu_create_if_necessary(sp);
 
   if (!s) {
@@ -1870,23 +1790,23 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     return 2;
   }
 
-  /* Allocate */
-  smsc_t *smsc =
-    (smsc_t *) malloc_and_zero(sizeof(*smsc));
-
-  multimessage_t *sms =
-    (multimessage_t *) malloc_and_zero(sizeof(*sms));
-
-  multimessage_info_t *info =
-    (multimessage_info_t *) malloc_and_zero(sizeof(*info));
-
   /* Lazy initialization of libgammu */
   gammu_state_t *s = gammu_create_if_necessary(sp);
-
+printf("s: %lx, sp: %lx\n", s, *sp);
   if (!s) {
     print_operation_error(OP_ERR_INIT);
     rv = 3; goto cleanup;
   }
+
+  /* Allocate */
+  smsc_t *smsc =
+    (smsc_t *) allocate(sizeof(*smsc));
+
+  multimessage_t *sms =
+    (multimessage_t *) allocate(sizeof(*sms));
+
+  multimessage_info_t *info =
+    (multimessage_info_t *) allocate(sizeof(*info));
 
   /* Find SMSC number */
   smsc->Location = 1;
@@ -1946,7 +1866,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
         terminated by a single 2-byte UCS-2 null character. */
 
     unsigned char *sms_message_ucs2 =
-      (unsigned char *) malloc_and_zero((ml.symbols + 1) * 2);
+      (unsigned char *) allocate_array(2, ml.symbols, 1);
 
     DecodeUTF8(sms_message_ucs2, sms_message, ml.bytes);
 
@@ -2066,7 +1986,7 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
       ++argp; ++rv;
 
       /* FIXME: Remove this when REPL mode is stable */
-      fprintf(stderr, "Warning: -r/--repl is experimental code\n");
+      warn("-r/--repl is experimental code");
 
       continue;
     }
@@ -2087,7 +2007,7 @@ int parse_global_arguments(int argc, char *argv[], app_options_t *o) {
  *   executed (whether successfully or resulting in an error),
  *   or `false` if the command specified was not found.
  */
-boolean_t process_command(gammu_state_t *s,
+boolean_t process_command(gammu_state_t **s,
                           int argc, char *argv[], int *rv) {
 
   *rv = 0;
@@ -2096,7 +2016,7 @@ boolean_t process_command(gammu_state_t *s,
    *   Retrieve all messages as a JSON array. */
 
   if (argc > 0 && strcmp(argv[0], "retrieve") == 0) {
-    *rv = action_retrieve_messages(&s, argc, argv);
+    *rv = action_retrieve_messages(s, argc, argv);
     return TRUE;
   }
 
@@ -2104,7 +2024,7 @@ boolean_t process_command(gammu_state_t *s,
    *   Delete messages specified in `argv` (or all messages). */
 
   if (argc > 0 && strcmp(argv[0], "delete") == 0) {
-    *rv = action_delete_messages(&s, argc, argv);
+    *rv = action_delete_messages(s, argc, argv);
     return TRUE;
   }
 
@@ -2112,7 +2032,7 @@ boolean_t process_command(gammu_state_t *s,
    *   Send one or more messages, each to a single recipient. */
 
   if (argc > 0 && strcmp(argv[0], "send") == 0) {
-    *rv = action_send_messages(&s, argc, argv);
+    *rv = action_send_messages(s, argc, argv);
     return TRUE;
   }
 
@@ -2122,7 +2042,7 @@ boolean_t process_command(gammu_state_t *s,
 /**
  * @name process_repl_commands:
  */
-void process_repl_commands(gammu_state_t *s, FILE *stream) {
+void process_repl_commands(gammu_state_t **s, FILE *stream) {
 
   for (;;) {
 
@@ -2134,7 +2054,7 @@ void process_repl_commands(gammu_state_t *s, FILE *stream) {
     }
 
     if (is_eof && line[0] == '\0') {
-      return;
+      goto cleanup;
     }
 
     parsed_json_t *p = parse_json(line);
@@ -2171,6 +2091,8 @@ void process_repl_commands(gammu_state_t *s, FILE *stream) {
       if (p) {
         release_parsed_json(p);
       }
+
+    cleanup:
 
       free(line);
 
@@ -2213,7 +2135,7 @@ int main(int argc, char *argv[]) {
    *   This runs the operation provided via command-line arguments. */
 
   if (argc > 0) {
-    if (!process_command(s, argc, argp, &rv)) {
+    if (!process_command(&s, argc, argp, &rv)) {
       print_usage_error(U_ERR_CMD_INVAL);
     }
   } else if (!app.repl) {
@@ -2227,7 +2149,7 @@ int main(int argc, char *argv[]) {
    *  to `process_command`, and repeat until reaching end-of-file. */
 
   if (app.repl) {
-    process_repl_commands(s, stdin);
+    process_repl_commands(&s, stdin);
   }
 
   cleanup:
@@ -2240,4 +2162,3 @@ int main(int argc, char *argv[]) {
 }
 
 /* vim: set ts=4 sts=2 sw=2 expandtab: */
-
