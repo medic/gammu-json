@@ -966,19 +966,19 @@ boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
 /** --- **/
 
 /**
- * @name ucs2_encode_json_utf8:
+ * @name utf16be_encode_json_utf8:
  *   Copy and transform the string `s` to a newly-allocated
  *   buffer, making it suitable for output as a single utf-8
  *   JSON string. The caller must free the returned string.
  */
-char *ucs2_encode_json_utf8(const unsigned char *s) {
+char *utf16be_encode_json_utf8(const unsigned char *s) {
 
   unsigned int i, j = 0;
   int ul = UnicodeLength(s);
 
-  /* Worst-case UCS-2 string allocation:
+  /* Worst-case UTF-16-BE string allocation:
    *  Original length plus null terminator; two bytes for each
-   *  character; every character escaped with a UCS-2 backslash. */
+   *  character; every character escaped with a UTF-16 backslash. */
 
   unsigned char *b =
     (unsigned char *) allocate_array(2 * 2, ul, 1);
@@ -1052,9 +1052,9 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
 }
 
 /**
- * @name ucs2_is_gsm_codepoint:
+ * @name utf16be_is_gsm_codepoint:
  *   Given the most-significant byte `msb` and the least-significant
- *   byte `lsb` of a UCS-2 character, return TRUE if the character
+ *   byte `lsb` of a UCS-16-BE character, return TRUE if the character
  *   can be represented in the default GSM alphabet (described in GSM
  *   03.38). The GSM-to-Unicode conversion table used here was obtained
  *   from http://www.unicode.org/Public/MAPPINGS/ETSI/GSM0338.TXT.
@@ -1067,7 +1067,7 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
  *   attached.
  *  
  */
-boolean_t ucs2_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
+boolean_t utf16be_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
 
   switch (msb) {
 
@@ -1118,17 +1118,17 @@ boolean_t ucs2_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
 }
 
 /**
- * @name ucs2_is_gsm_string:
- *   Return true if the UCS-2 string `s` can be represented in
+ * @name utf16be_is_gsm_string:
+ *   Return true if the UCS-16-BE string `s` can be represented in
  *   the GSM default alphabet. The input string should be terminated
- *   by the UCS-2 null character (i.e. two null bytes).
+ *   by the UTF-16-BE null character (i.e. two null bytes).
  */
-boolean_t ucs2_is_gsm_string(const unsigned char *s) {
+boolean_t utf16be_is_gsm_string(const unsigned char *s) {
 
   int ul = UnicodeLength(s);
 
   for (unsigned int i = 0; i < ul; ++i) {
-    if (!ucs2_is_gsm_codepoint(s[2 * i], s[2 * i + 1])) {
+    if (!utf16be_is_gsm_codepoint(s[2 * i], s[2 * i + 1])) {
       return FALSE;
     }
   }
@@ -1291,12 +1291,12 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     printf("\"location\": %d, ", sms->SMS[i].Location);
 
     /* Originating phone number */
-    char *from = ucs2_encode_json_utf8(sms->SMS[i].Number);
+    char *from = utf16be_encode_json_utf8(sms->SMS[i].Number);
     printf("\"from\": \"%s\", ", from);
     free(from);
 
     /* Phone number of telco's SMS service center */
-    char *smsc = ucs2_encode_json_utf8(sms->SMS[i].SMSC.Number);
+    char *smsc = utf16be_encode_json_utf8(sms->SMS[i].SMSC.Number);
     printf("\"smsc\": \"%s\", ", smsc);
     free(smsc);
 
@@ -1347,7 +1347,7 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
       case SMS_Coding_Default_No_Compression:
       case SMS_Coding_Unicode_No_Compression: {
         printf("\"encoding\": \"utf-8\", ");
-        char *text = ucs2_encode_json_utf8(sms->SMS[i].Text);
+        char *text = utf16be_encode_json_utf8(sms->SMS[i].Text);
         printf("\"content\": \"%s\", ", text);
         free(text);
         break;
@@ -1735,7 +1735,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
         printf("\"error\": \"%s\", ", t->parts[i].err); /* const */
       } else {
         printf("\"result\": \"success\", ");
-        char *text = ucs2_encode_json_utf8(m->SMS[i].Text);
+        char *text = utf16be_encode_json_utf8(m->SMS[i].Text);
         printf("\"content\": \"%s\", ", text);
         free(text);
       }
@@ -1792,7 +1792,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
 
   /* Lazy initialization of libgammu */
   gammu_state_t *s = gammu_create_if_necessary(sp);
-printf("s: %lx, sp: %lx\n", s, *sp);
+
   if (!s) {
     print_operation_error(OP_ERR_INIT);
     rv = 3; goto cleanup;
@@ -1861,23 +1861,23 @@ printf("s: %lx, sp: %lx\n", s, *sp);
     char *sms_message = *argp++;
     utf8_string_length(sms_message, &ml);
 
-    /* Convert message from UTF-8 to UCS-2:
+    /* Convert message from UTF-8 to UTF-16-BE:
         Every symbol is two bytes long; the string is then
-        terminated by a single 2-byte UCS-2 null character. */
+        terminated by a single 2-byte UTF-16 null character. */
 
-    unsigned char *sms_message_ucs2 =
+    unsigned char *sms_message_utf16be =
       (unsigned char *) allocate_array(2, ml.symbols, 1);
 
-    DecodeUTF8(sms_message_ucs2, sms_message, ml.bytes);
+    DecodeUTF8(sms_message_utf16be, sms_message, ml.bytes);
 
     /* Prepare message info structure:
         This information is used to encode the possibly-multipart SMS. */
 
     info->Class = 1;
     info->EntriesNum = 1;
-    info->Entries[0].Buffer = sms_message_ucs2;
+    info->Entries[0].Buffer = sms_message_utf16be;
     info->Entries[0].ID = SMS_ConcatenatedTextLong;
-    info->UnicodeCoding = !ucs2_is_gsm_string(sms_message_ucs2);
+    info->UnicodeCoding = !utf16be_is_gsm_string(sms_message_utf16be);
 
     if ((s->err = GSM_EncodeMultiPartSMS(debug, info, sms)) != ERR_NONE) {
       status.err = "Failed to encode message";
@@ -1926,7 +1926,7 @@ printf("s: %lx, sp: %lx\n", s, *sp);
 
     cleanup_sms_text:
       status.message_index = ++message_index;
-      free(sms_message_ucs2);
+      free(sms_message_utf16be);
 
     cleanup_transmit_status:
       print_json_transmit_status(s, sms, &status, is_start);
@@ -1934,12 +1934,14 @@ printf("s: %lx, sp: %lx\n", s, *sp);
   }
 
   cleanup_sms:
+
     free(sms);
     free(smsc);
     free(info);
     printf("]\n");
   
   cleanup:
+
     return rv;
 }
 
