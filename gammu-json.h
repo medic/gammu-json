@@ -36,12 +36,6 @@
 #define __GAMMU_JSON_H__
 
 /** --- **/
-
-/**
- * @name boolean_t:
- */
-typedef uint8_t boolean_t;
-
 /**
  * @name gammu_state_t:
  */
@@ -98,26 +92,6 @@ typedef boolean_t (*message_iterate_fn_t)(
   gammu_state_t *, multimessage_t *, boolean_t, void *
 );
 
-/**
- * @name bitfield_t:
- */
-typedef struct bitfield {
-
-  uint8_t *data;
-  unsigned int n;
-  unsigned int total_set;
-
-} bitfield_t;
-
-/**
- * @name utf8_info_t:
- */
-typedef struct utf8_length_info {
-
-  unsigned int bytes;
-  unsigned int symbols;
-
-} utf8_length_info_t;
 
 /**
  * @name part_transmit_status_t:
@@ -178,17 +152,6 @@ typedef enum {
 
 } delete_stage_t;
 
-/**
- * @name delete_stage_t:
- */
-typedef struct parsed_json {
-
-  char *json;
-  jsmn_parser parser;
-  jsmntok_t *tokens;
-  unsigned int nr_tokens;
-
-} parsed_json_t;
 
 /**
  * @name delete_callback_fn_t:
@@ -219,25 +182,12 @@ typedef enum {
 } usage_error_t;
 
 /**
- * @name json_validation_state_t:
+ * @name print_json_validation_error:
  */
-typedef enum {
-  START = 0, IN_ROOT_OBJECT, IN_ARGUMENTS_ARRAY, SUCCESS
-} json_validation_state_t;
-
-/**
- * @name validation_error_t:
- */
-typedef enum {
-  V_ERR_NONE = 0, V_ERR_PARSE = 1,
-    V_ERR_MEM_LIMIT = 2, V_ERR_MEM_ALLOC = 3,
-    V_ERR_OVERFLOW = 3, V_ERR_ROOT_TYPE = 5,
-    V_ERR_PROPS_TYPE = 6, V_ERR_PROPS_ODD = 7,
-    V_ERR_CMD_TYPE = 8, V_ERR_ARGS_TYPE = 9,
-    V_ERR_ARG_TYPE = 10, V_ERR_ARGS_NUMERIC = 11,
-    V_ERR_PROPS_MISSING = 12, V_ERR_UNKNOWN = 13
-} validation_error_t;
+void print_json_validation_error(json_validation_error_t err);
 
 /** --- **/
 
 #endif /* __GAMMU_JSON_H__ */
+
+/* vim: set ts=4 sts=2 sw=2 expandtab: */

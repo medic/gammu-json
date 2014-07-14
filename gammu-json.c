@@ -45,43 +45,17 @@
 #include <gammu.h>
 #include <jsmn.h>
 
+#include "json.h"
+#include "allocate.h"
+#include "bitfield.h"
+#include "encoding.h"
 #include "gammu-json.h"
 
 /** --- **/
 
-#define timestamp_max_width (64)
-#define bitfield_cell_width (CHAR_BIT)
-
-#define read_line_size_start   (1024)
-#define read_line_size_maximum (4194304)
-
-#define json_argument_list_start    (128)
-#define json_argument_list_maximum  (524288)
-
-/** --- **/
-
-#define print_stderr(prefix, ...) \
-  do { \
-    fprintf(stderr, "%s: ", prefix); \
-    fprintf(stderr, ##__VA_ARGS__); \
-    fprintf(stderr, "\n"); \
-  } while (0)
-
-#define fatal(exit_status, ...) \
-  do { \
-    print_stderr("Fatal", ##__VA_ARGS__); \
-    exit(exit_status); \
-  } while (0)
-
-#define warn(...) \
-  do { \
-    print_stderr("Warning", ##__VA_ARGS__); \
-  } while (0)
-
-#define debug(...) \
-  do { \
-    print_stderr("Debug", ##__VA_ARGS__); \
-  } while (0)
+#define timestamp_max_width     (64)
+#define read_line_size_start    (1024)
+#define read_line_size_maximum  (4194304)
 
 /** --- **/
 
@@ -172,119 +146,6 @@ static app_options_t app; /* global */
 /** --- **/
 
 /**
- * @name addition_will_overflow:
- */
-int addition_will_overflow(size_t a, size_t b) {
-
-  return (((size_t) -1 - a) < b);
-}
-
-/**
- * @name multiplication_will_overflow:
- */
-int multiplication_will_overflow(size_t a, size_t b) {
-
-  if (a == 0 || b == 0) {
-    return FALSE;
-  }
-
-  return (((size_t) -1 / b) < a);
-}
-
-/**
- * @name allocate:
- */
-static void *allocate(size_t size) {
-
-  void *rv = malloc(size);
-
-  if (!rv) {
-    fatal(127, "allocation failure; couldn't allocate %lu bytes", size);
-  }
-
-  return rv;
-}
-
-/**
- * @name allocate_array:
- */
-static void *allocate_array(size_t size, size_t items, size_t extra) {
-
-  const char *multiplication_message =
-    "allocation failure; multiplication would overflow (%lu * %lu)";
-
-  const char *addition_message =
-    "allocation failure; addition would overflow (%lu + %lu)";
-
-  if (multiplication_will_overflow(size, items)) {
-    fatal(126, multiplication_message, size, items);
-  }
-  
-  if (multiplication_will_overflow(size, extra)) {
-    fatal(125, multiplication_message, size, extra);
-  }
-
-  items *= size;
-  extra *= size;
-
-  if (addition_will_overflow(items, extra)) {
-    fatal(124, addition_message, items, extra);
-  }
-
-  return allocate(items + extra);
-}
-
-/**
- * @name reallocate:
- */
-static void *reallocate(void *p, size_t size) {
-
-  void *rv = realloc(p, size);
-
-  if (!rv) {
-    warn("reallocation failure; couldn't enlarge region to %lu bytes", size);
-    return NULL;
-  }
-
-  return rv;
-}
-
-/**
- * @name reallocate_array:
- */
-static void *reallocate_array(void *p, size_t size,
-                              size_t items, size_t extra) {
-
-  const char *multiplication_message =
-    "reallocation failure; multiplication would overflow (%lu * %lu)";
-
-  const char *addition_message =
-    "reallocation failure; addition would overflow (%lu * %lu)";
-
-  if (multiplication_will_overflow(size, items)) {
-    warn(multiplication_message, size, items);
-    return NULL;
-  }
-
-  if (multiplication_will_overflow(size, extra)) {
-    warn(multiplication_message, size, extra);
-    return NULL;
-  }
-
-  items *= size;
-  extra *= size;
-
-  if (addition_will_overflow(items, extra)) {
-    warn(addition_message, items, extra);
-    return NULL;
-  }
-
-  return reallocate(p, items + extra);
-}
-
-/** --- **/
-
-/**
  * @name read_line:
  *   Read a line portably, relying only upon the C library's
  *   `getc` standard I/O function. This should work on any
@@ -293,17 +154,15 @@ static void *reallocate_array(void *p, size_t size,
 char *read_line(FILE *stream, boolean_t *eof) {
 
   int c;
-  char *rv = NULL;
   unsigned int i = 0;
-  unsigned int size = 0;
+  unsigned int size = read_line_size_start;
+
+  char *rv = allocate_array(sizeof(char), size, 1);
 
   for (;;) {
 
     if (!size || i >= size) {
-      size = (
-        (size ? size * 8 : read_line_size_start)
-      );
-      if (size >= read_line_size_maximum) {
+      if ((size *= 8) >= read_line_size_maximum) {
         goto allocation_error;
       }
       if (!(rv = (char *) reallocate_array(rv, sizeof(char), size, 1))) {
@@ -394,359 +253,6 @@ static void print_operation_error(operation_error_t err) {
   }
 }
 
-/* --- */
-
-/**
- * @name json_validation_errors:
- */
-static const char *const json_validation_errors[] = {
-  /* 0 */  "success; no error",
-  /* 1 */  "parse error: invalid or malformed JSON",
-  /* 2 */  "parser memory limit exceeded",
-  /* 3 */  "internal error: memory allocation failure",
-  /* 4 */  "internal error: integer value would overflow",
-  /* 5 */  "root entity must be an object",
-  /* 6 */  "property names must be strings",
-  /* 7 */  "object contains one or more incomplete key/value pairs",
-  /* 8 */  "value for the `command` property must be a string",
-  /* 9 */  "value for `arguments` property must be an array",
-  /* 10 */ "arguments must be either strings or numeric values",
-  /* 11 */ "non-string values in `arguments` must be numeric",
-  /* 12 */ "one or more required properties are missing"
-};
-
-/**
- * @name print_json_validation_error:
- */
-static void print_json_validation_error(validation_error_t err) {
-
-  const char *s = (
-    err < V_ERR_UNKNOWN ?
-      json_validation_errors[err] : "unknown or unhandled error"
-  );
-
-  if (app.repl) {
-    print_repl_error(err, s);
-  } else {
-    fprintf(stderr, "Error: %s.\n", s);
-    fprintf(stderr, "Failure while parsing/validating JSON.\n");
-  }
-}
-
-/* --- */
-
-/**
- * @name parsed_json_to_arguments:
- */
-boolean_t parsed_json_to_arguments(parsed_json_t *p,
-                                   int *argc, char **argv[], int *err) {
-
-  int n = 0;
-  char **rv = NULL;
-
-  unsigned int size = 0;
-  jsmntok_t *tokens = p->tokens;
-  json_validation_state_t state = START;
-  boolean_t matched_keys[] = { FALSE, FALSE };
-  unsigned int object_size = 0, array_size = 0;
-
-  #define return_validation_error(e) \
-    do { *err = (e); goto validation_error; } while (0)
-
-  #define token_lookahead(i, c) \
-    (((i) + (c)) < p->nr_tokens && \
-      !jsmn_token_is_invalid(tokens + (i) + (c)) ? \
-        (tokens + (i) + (c)) : NULL)
-
-  /* For every token */
-  for (unsigned int i = 0; i < p->nr_tokens; ++i) {
-
-    jsmntok_t *t = &tokens[i];
-
-    if (matched_keys[0] && matched_keys[1]) {
-      state = SUCCESS;
-      break;
-    }
-
-    if (jsmn_token_is_invalid(t)) {
-      break;
-    }
-
-    if (!size || n >= size) {
-
-      /* Increase size by a few orders of magnitude */
-      size = (size ? size * 8 : json_argument_list_start);
-
-      /* Increase size, then check against memory limit */
-      if (size > json_argument_list_maximum) {
-        return_validation_error(V_ERR_MEM_LIMIT);
-      }
-
-      /* Enlarge array of argument pointers */
-      if (!(rv = (char **) reallocate_array(rv, sizeof(char *), size, 1))) {
-        return_validation_error(V_ERR_MEM_ALLOC);
-      }
-    }
-
-    switch (state) {
-
-      case START: {
-
-        if (t->type != JSMN_OBJECT) {
-          return_validation_error(V_ERR_ROOT_TYPE);
-        }
-
-        if (t->size % 2 != 0) {
-          return_validation_error(V_ERR_PROPS_ODD);
-        }
-
-        object_size = t->size;
-        state = IN_ROOT_OBJECT;
-
-        break;
-      }
-
-      case IN_ROOT_OBJECT: {
-
-        if (object_size <= 0) {
-          break;
-        }
-
-        if (t->type != JSMN_STRING) {
-          return_validation_error(V_ERR_PROPS_TYPE);
-        }
-
-        char *s = jsmn_stringify_token(p->json, t);
-
-        if (!(t = token_lookahead(i, 1))) {
-          return_validation_error(V_ERR_PROPS_ODD);
-        }
-
-        if (strcmp(s, "command") == 0) {
-
-          if (t->type != JSMN_STRING) {
-            return_validation_error(V_ERR_CMD_TYPE);
-          }
-
-          rv[0] = jsmn_stringify_token(p->json, t);
-          matched_keys[0] = TRUE;
-
-        } else if (strcmp(s, "arguments") == 0) {
-
-          if (t->type != JSMN_ARRAY && t->type != JSMN_OBJECT) {
-            return_validation_error(V_ERR_ARGS_TYPE);
-          }
-
-          /* Handle empty arrays */
-          jsmntok_t *tt = token_lookahead(i, 2);
-
-          if (!tt || t->size <= 0) {
-            matched_keys[1] = TRUE;
-          } else {
-            state = IN_ARGUMENTS_ARRAY;
-          }
-
-          /* Enter array */
-          array_size = t->size;
-        }
-
-        /* To walk the stair / steps in pairs */
-        object_size -= 2;
-        i++;
-
-        break;
-      }
-
-      case IN_ARGUMENTS_ARRAY: {
-
-        if (t->type != JSMN_PRIMITIVE && t->type != JSMN_STRING) {
-          return_validation_error(V_ERR_ARG_TYPE);
-        }
-
-        char *s = jsmn_stringify_token(p->json, t);
-
-        /* Require that primitives are numeric */
-        if (t->type == JSMN_PRIMITIVE && (!s || !isdigit(s[0]))) {
-          return_validation_error(V_ERR_ARGS_NUMERIC);
-        }
-
-        rv[++n] = s;
-
-        if (--array_size <= 0) {
-          matched_keys[1] = TRUE;
-          state = IN_ROOT_OBJECT;
-        }
-
-        break;
-      }
-
-      case SUCCESS: {
-        goto successful;
-      }
-
-      default: {
-        return_validation_error(V_ERR_UNKNOWN);
-        break;
-      }
-    }
-  }
-
-  if (state != SUCCESS) {
-    return_validation_error(V_ERR_PROPS_MISSING);
-  }
-
-  /* Victory */
-  successful:
-
-    /* Null-terminate */
-    rv[n + 2] = NULL;
-
-    /* Return values */
-    *argv = rv;
-    *argc = n + 1;
-
-    /* Success */
-    return TRUE;
-
-  /* Non-victory */
-  validation_error:
-
-    if (rv) {
-      free(rv);
-    }
-
-    return FALSE;
-}
-
-/** --- **/
-
-#define json_parser_tokens_start     (32)
-#define json_parser_tokens_maximum   (32768)
-
-/**
- * @name print_parsed_json:
- */
-void print_parsed_json(parsed_json_t *p) {
-
-  debug("start\n");
-
-  for (unsigned int i = 0; i < p->nr_tokens; ++i) {
-
-    jsmntok_t *t = &p->tokens[i];
-
-    if (jsmn_token_is_invalid(t)) {
-      debug("end\n");
-      break;
-    }
-    
-    char *s = jsmn_stringify_token(p->json, t);
-
-    switch (t->type) {
-      case JSMN_STRING:
-        debug("string: '%s'\n", s);
-        break;
-      case JSMN_PRIMITIVE:
-        debug("primitive: '%s'\n", s);
-        break;
-      case JSMN_OBJECT:
-        debug("object[%d]\n", t->size);
-        break;
-      case JSMN_ARRAY:
-        debug("array[%d]\n", t->size);
-        break;
-      default:
-        debug("unknown-%d[%d]: '%s'\n", t->type, t->size, s);
-        continue;
-    }
-  }
-}
-
-/**
- * @name parse_json:
- */
-parsed_json_t *parse_json(char *json) {
-
-  parsed_json_t *rv =
-    (parsed_json_t *) allocate(sizeof(parsed_json_t));
-
-  if (!rv) {
-    return NULL;
-  }
-
-  rv->json = json;
-  rv->tokens = NULL;
-  rv->nr_tokens = 0;
-
-  unsigned int n = json_parser_tokens_start;
-
-  for (;;) {
-
-    /* Check against upper limit */
-    if (n > json_parser_tokens_maximum) {
-      goto allocation_error;
-    }
-
-    jsmn_init(&rv->parser);
-
-    rv->tokens =
-      reallocate_array(rv->tokens, sizeof(jsmntok_t), n, 0);
-
-    if (!rv->tokens) {
-      goto allocation_error;
-    }
-
-    /* Set all tokens to invalid */
-    for (unsigned int i = 0; i < n; ++i) {
-      jsmn_mark_token_invalid(&rv->tokens[i]);
-    }
-
-    /* Parse */
-    jsmnerr_t result =
-      jsmn_parse(&rv->parser, json, rv->tokens, n);
-
-    /* Not enough room to parse the full string?
-     *   Increase the available token space by a couple (base two)
-     *   orders of magnitude, then go around, reallocate, and retry. */
-
-    if (result == JSMN_ERROR_NOMEM) {
-      n *= 4;
-      continue;
-    }
-
-    if (result < 0) {
-      goto allocation_error;
-    }
-
-    /* Parsed successfully */
-    rv->nr_tokens = n;
-    break;
-  }
-
-  /* Success */
-  return rv;
-
-  /* Error:
-   *  Clean up the `rv` structure and its members. */
-
-  allocation_error:
-
-    if (rv->tokens) {
-      free(rv->tokens);
-    }
-
-    free(rv);
-    return NULL;
-}
-
-/**
- * @name release_parsed_json:
- */
-void release_parsed_json(parsed_json_t *p) {
-
-  free(p->tokens);
-  free(p);
-}
-
 /** --- **/
 
 /**
@@ -805,116 +311,6 @@ app_options_t *initialize_application_options(app_options_t *o) {
 }
 
 /**
- * @name utf8_string_length:
- */
-utf8_length_info_t *utf8_string_length(const char *str,
-                                       utf8_length_info_t *i) {
-  const char *p = str;
-  unsigned int bytes = 0, symbols = 0;
-
-  while (*p++) {
-    if ((*p & 0xc0) != 0x80) {
-      symbols++;
-    }
-    bytes++;
-  }
-
-  i->bytes = bytes;
-  i->symbols = symbols;
-
-  return i;
-}
-
-/** --- **/
-
-/**
- * @name bitfield_create:
- */
-bitfield_t *bitfield_create(unsigned int bits) {
-
-  unsigned int size = bits + 1; /* One-based */
-  unsigned int cells = (size / bitfield_cell_width);
-
-  bitfield_t *rv = (bitfield_t *) allocate(sizeof(*rv));
-
-  if (size % bitfield_cell_width) {
-    cells++;
-  }
-
-  rv->n = bits;
-  rv->total_set = 0;
-  rv->data = (uint8_t *) calloc(cells, bitfield_cell_width);
-
-  return rv;
-}
-
-/**
- * @name bitfield_destroy:
- */
-void bitfield_destroy(bitfield_t *bf) {
-
-  free(bf->data);
-  free(bf);
-}
-
-/**
- * @name bitfield_test:
- *   Return true if the (zero-based or one-based) bit `bit` is set.
- *   Returns true on success, false if `bit` is out of range for this
- *   bitfield. You may use either zero-based addressing or one-based
- *   addressing, as long as you remain consistent for each instance
- *   of a bitfield_t.
- */
-boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
-
-  if (bit > bf->n) {
-    return FALSE;
-  }
-
-  unsigned long cell = (bit / bitfield_cell_width);
-  unsigned long offset = (bit % bitfield_cell_width);
-
-  return (bf->data[cell] & (1 << offset));
-}
-
-/**
- * @name bitfield_set:
- *   Set the (zero-based or one-based) bit `bit` to one if `value` is
- *   true, otherwise set the bit to zero. Returns true on success, false
- *   if the bit `bit` is out of range for this particular bitfield.  You
- *   may use either zero-based addressing or one-based addressing, as
- *   long as you remain consistent for each instance of a bitfield_t.
- */
-boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t
-        value) {
-
-  if (bit > bf->n) {
-    return FALSE;
-  }
-
-  unsigned long cell = (bit / bitfield_cell_width);
-  unsigned long offset = (bit % bitfield_cell_width);
-
-  int prev_value = (
-    (bf->data[cell] & (1 << offset)) != 0
-  );
-
-  if (value) {
-    bf->data[cell] |= (1 << offset);
-  } else {
-    bf->data[cell] &= ~(1 << offset);
-  }
-
-  if (value && !prev_value) {
-    bf->total_set++;
-  } else if (prev_value && !value) {
-    bf->total_set--;
-  }
-
-  return TRUE;
-}
-
-/**
  * @name find_maximum_integer_argument:
  */
 boolean_t find_maximum_integer_argument(unsigned long *rv, char *argv[]) {
@@ -941,95 +337,6 @@ boolean_t find_maximum_integer_argument(unsigned long *rv, char *argv[]) {
   return found;
 }
 
-/**
- * @name bitfield_set_integer_arguments:
- */
-boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
-
-  for (unsigned int i = 0; argv[i] != NULL; i++) {
-
-    char *err = NULL;
-    unsigned long n = strtoul(argv[i], &err, 10);
-
-    if (err == NULL || *err != '\0') {
-      return FALSE;
-    }
-
-    if (!bitfield_set(bf, n, TRUE)) {
-      return FALSE;
-    }
-  }
-
-  return TRUE;
-}
-
-/** --- **/
-
-/**
- * @name utf16be_encode_json_utf8:
- *   Copy and transform the string `s` to a newly-allocated
- *   buffer, making it suitable for output as a single utf-8
- *   JSON string. The caller must free the returned string.
- */
-char *utf16be_encode_json_utf8(const unsigned char *s) {
-
-  unsigned int i, j = 0;
-  int ul = UnicodeLength(s);
-
-  /* Worst-case UTF-16-BE string allocation:
-   *  Original length plus null terminator; two bytes for each
-   *  character; every character escaped with a UTF-16 backslash. */
-
-  unsigned char *b =
-    (unsigned char *) allocate_array(2 * 2, ul, 1);
-
-  for (i = 0; i < ul; ++i) {
-    unsigned char msb = s[2 * i], lsb = s[2 * i + 1];
-
-    if (msb == '\0') {
-      unsigned char escape = '\0';
-
-      switch (lsb) {
-        case '\r':
-          escape = 'r'; break;
-        case '\n':
-          escape = 'n'; break;
-        case '\f':
-          escape = 'f'; break;
-        case '\b':
-          escape = 'b'; break;
-        case '\t':
-          escape = 't'; break;
-        case '\\': case '"':
-          escape = lsb; break;
-        default:
-          break;
-      };
-
-      if (escape != '\0') {
-        b[j++] = '\0';
-        b[j++] = '\\';
-        lsb = escape;
-      }
-    }
-
-    b[j++] = msb;
-    b[j++] = lsb;
-  }
-
-  b[j++] = '\0';
-  b[j++] = '\0';
-
-  /* Worst-case UTF-8:
-   *  Four bytes per character (see RFC3629) plus null terminator. */
-
-  char *rv = (char *) allocate_array(4, UnicodeLength(b), 1);
-
-  EncodeUTF8(rv, b);
-  free(b);
-
-  return rv;
-}
 
 /**
  * @name encode_timestamp_utf8:
@@ -1051,90 +358,6 @@ char *encode_timestamp_utf8(message_timestamp_t *t) {
   return rv;
 }
 
-/**
- * @name utf16be_is_gsm_codepoint:
- *   Given the most-significant byte `msb` and the least-significant
- *   byte `lsb` of a UCS-16-BE character, return TRUE if the character
- *   can be represented in the default GSM alphabet (described in GSM
- *   03.38). The GSM-to-Unicode conversion table used here was obtained
- *   from http://www.unicode.org/Public/MAPPINGS/ETSI/GSM0338.TXT.
- *
- *   Copyright (c) 2000 - 2009 Unicode, Inc. All Rights reserved.
- *   Unicode, Inc. hereby grants the right to freely use the information
- *   supplied in this file in the creation of products supporting the
- *   Unicode Standard, and to make copies of this file in any form for
- *   internal or external distribution as long as this notice remains
- *   attached.
- *  
- */
-boolean_t utf16be_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
-
-  switch (msb) {
-
-    case 0x00: {
-      int rv = (
-        (lsb >= 0x20 && lsb <= 0x5f)
-          || (lsb >= 0x61 && lsb <= 0x7e)
-          || (lsb >= 0xa3 && lsb <= 0xa5)
-          || (lsb >= 0xc4 && lsb <= 0xc6)
-          || (lsb >= 0xe4 && lsb <= 0xe9)
-      );
-      if (rv) {
-        return TRUE;
-      }
-      switch (lsb) {
-        case 0x0a: case 0x0c: case 0x0d:
-        case 0xa0: case 0xa1: case 0xa7:
-        case 0xbf: case 0xc9: case 0xd1:
-        case 0xd6: case 0xd8: case 0xdc:
-        case 0xdf: case 0xe0: case 0xec:
-        case 0xf1: case 0xf2: case 0xf6:
-        case 0xf8: case 0xf9: case 0xfc:
-          return TRUE;
-        default:
-          return FALSE;
-      }
-    }
-    case 0x03: {
-      switch (lsb) {
-        case 0x93: case 0x94:
-        case 0x98: case 0x9b:
-        case 0x9e: case 0xa0:
-        case 0xa3: case 0xa6:
-        case 0xa8: case 0xa9:
-          return TRUE;
-        default:
-          return FALSE;
-      }
-    }
-    case 0x20: {
-      return (lsb == 0xac);
-    }
-    default:
-      break;
-  }
-
-  return FALSE;
-}
-
-/**
- * @name utf16be_is_gsm_string:
- *   Return true if the UCS-16-BE string `s` can be represented in
- *   the GSM default alphabet. The input string should be terminated
- *   by the UTF-16-BE null character (i.e. two null bytes).
- */
-boolean_t utf16be_is_gsm_string(const unsigned char *s) {
-
-  int ul = UnicodeLength(s);
-
-  for (unsigned int i = 0; i < ul; ++i) {
-    if (!utf16be_is_gsm_codepoint(s[2 * i], s[2 * i + 1])) {
-      return FALSE;
-    }
-  }
-
-  return TRUE;
-}
 
 /**
  * @name is_empty_timestamp:
@@ -1684,6 +907,21 @@ int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
 }
 
 /** --- **/
+
+/**
+ * @name print_json_validation_error:
+ */
+void print_json_validation_error(json_validation_error_t err) {
+
+  const char *s = json_validation_error_text(err);
+
+  if (app.repl) {
+    print_repl_error(err, s);
+  } else {
+    fprintf(stderr, "Error: %s.\n", s);
+    fprintf(stderr, "Failure while parsing/validating JSON.\n");
+  }
+}
 
 /**
  * @name print_json_transmit_status:
