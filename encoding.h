@@ -40,27 +40,42 @@
 /** --- **/
 
 /**
- * @name utf8_info_t:
+ * @name codepoint_t:
+ *   In-memory representation of a single Unicode codepoint.
+ *   This is an in-memory representation only, and is not
+ *   intended to serve as a valid external encoding.
  */
-typedef struct utf8_length_info {
-
-  unsigned int bytes;
-  unsigned int symbols;
-
-} utf8_length_info_t;
+typedef uint32_t codepoint_t;
 
 /**
- * @name utf16be_string_length:
+ * @name string_decode_error_t:
  */
-size_t utf16be_string_length(const unsigned char *s);
+typedef enum {
+  D_ERR_NONE = 0,
+  D_ERR_UNMATCHED_SURROGATE = 1,
+  D_ERR_UNEXPECTED_SURROGATE = 2,
+  D_ERR_PARTIAL_UNIT = 3,
+  D_ERR_UNKNOWN = 4
+} string_decode_error_t;
 
 /**
- * @name utf16be_encode_json_utf8:
- *   Copy and transform the string `s` to a newly-allocated
- *   buffer, making it suitable for output as a single utf-8
- *   JSON string. The caller must free the returned string.
+ * @name string_info_t:
  */
-char *utf16be_encode_json_utf8(const unsigned char *s);
+typedef struct string_info {
+
+  size_t bytes;
+  size_t units;
+  size_t symbols;
+
+  string_decode_error_t error;
+  size_t error_offset;
+
+} string_info_t;
+
+/**
+ * @name utf16be_string_info:
+ */
+boolean_t utf16be_string_info(const char *s, string_info_t *i);
 
 /**
  * @name utf16be_is_gsm_codepoint:
@@ -85,13 +100,20 @@ boolean_t utf16be_is_gsm_codepoint(uint8_t msb, uint8_t lsb);
  *   the GSM default alphabet. The input string should be terminated
  *   by the UTF-16-BE null character (i.e. two null bytes).
  */
-boolean_t utf16be_is_gsm_string(const unsigned char *s);
+boolean_t utf16be_is_gsm_string(const char *s);
 
 /**
- * @name utf8_string_length:
+ * @name utf8_string_info:
  */
-utf8_length_info_t *utf8_string_length(const char *str,
-                                       utf8_length_info_t *i);
+boolean_t utf8_string_info(const char *str, string_info_t *i);
+
+/**
+ * @name utf16be_encode_json_utf8:
+ *   Copy and transform the string `s` to a newly-allocated
+ *   buffer, making it suitable for output as a single utf-8
+ *   JSON string. The caller must free the returned string.
+ */
+char *utf16be_encode_json_utf8(const char *s);
 
 /** --- **/
 

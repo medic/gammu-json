@@ -32,6 +32,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <string.h>
 #include "allocate.h"
 
 /**
@@ -65,6 +66,7 @@ void *allocate(size_t size) {
     fatal(127, "allocation failure; couldn't allocate %lu bytes", size);
   }
 
+  memset(rv, '\0', size);
   return rv;
 }
 

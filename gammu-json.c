@@ -155,7 +155,7 @@ char *read_line(FILE *stream, boolean_t *eof) {
 
   int c;
   unsigned int i = 0;
-  unsigned int size = read_line_size_start;
+  size_t size = read_line_size_start;
 
   char *rv = allocate_array(sizeof(char), size, 1);
 
@@ -165,7 +165,7 @@ char *read_line(FILE *stream, boolean_t *eof) {
       if ((size *= 8) >= read_line_size_maximum) {
         goto allocation_error;
       }
-      if (!(rv = (char *) reallocate_array(rv, sizeof(char), size, 1))) {
+      if (!(rv = reallocate_array(rv, sizeof(char), size, 1))) {
         goto allocation_error;
       }
     }
@@ -222,7 +222,7 @@ void print_repl_error(int err, const char *s) {
 static void print_usage_error(usage_error_t err) {
 
   const char *s = (
-    err < U_ERR_UNKNOWN ?
+    err < U_ERR_BARRIER ?
       usage_errors[err] : "unknown or unhandled error"
   );
 
@@ -240,7 +240,7 @@ static void print_usage_error(usage_error_t err) {
 static void print_operation_error(operation_error_t err) {
 
   const char *s = (
-    err < OP_ERR_UNKNOWN ?
+    err < OP_ERR_BARRIER ?
       operation_errors[err] : "unknown or unhandled error"
   );
 
@@ -343,19 +343,18 @@ boolean_t find_maximum_integer_argument(unsigned long *rv, char *argv[]) {
  */
 char *encode_timestamp_utf8(message_timestamp_t *t) {
 
-  int n = timestamp_max_width;
-  char *rv = (char *) allocate(n);
+  char *rv = allocate(timestamp_max_width);
 
   #ifdef _WIN32
     #pragma warning(disable: 4996)
   #endif
 
   snprintf(
-    rv, n, "%.4d-%.2d-%.2d %.2d:%.2d:%.2d",
+    rv, timestamp_max_width, "%.4d-%.2d-%.2d %.2d:%.2d:%.2d",
       t->Year, t->Month, t->Day, t->Hour, t->Minute, t->Second
   );
 
-  return rv;
+  return (char *) rv;
 }
 
 
@@ -377,8 +376,7 @@ boolean_t is_empty_timestamp(message_timestamp_t *t) {
  */
 gammu_state_t *gammu_create(const char *config_path) {
 
-  gammu_state_t *s =
-    (gammu_state_t *) allocate(sizeof(*s));
+  gammu_state_t *s = allocate(sizeof(*s));
 
   INI_Section *ini;
   GSM_InitLocales(NULL);
@@ -466,8 +464,7 @@ boolean_t for_each_message(gammu_state_t *s,
   boolean_t rv = FALSE;
   boolean_t start = TRUE;
 
-  multimessage_t *sms =
-    (multimessage_t *) allocate(sizeof(*sms));
+  multimessage_t *sms = allocate(sizeof(*sms));
 
   for (;;) {
 
@@ -514,12 +511,16 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     printf("\"location\": %d, ", sms->SMS[i].Location);
 
     /* Originating phone number */
-    char *from = utf16be_encode_json_utf8(sms->SMS[i].Number);
+    char *from =
+      utf16be_encode_json_utf8((char *) sms->SMS[i].Number);
+
     printf("\"from\": \"%s\", ", from);
     free(from);
 
     /* Phone number of telco's SMS service center */
-    char *smsc = utf16be_encode_json_utf8(sms->SMS[i].SMSC.Number);
+    char *smsc =
+      utf16be_encode_json_utf8((char *) sms->SMS[i].SMSC.Number);
+
     printf("\"smsc\": \"%s\", ", smsc);
     free(smsc);
 
@@ -527,7 +528,9 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     if (is_empty_timestamp(&sms->SMS[i].DateTime)) {
       printf("\"timestamp\": false, ");
     } else {
-      char *timestamp = encode_timestamp_utf8(&sms->SMS[i].DateTime);
+      char *timestamp =
+        encode_timestamp_utf8(&sms->SMS[i].DateTime);
+
       printf("\"timestamp\": \"%s\", ", timestamp);
       free(timestamp);
     }
@@ -536,7 +539,9 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     if (is_empty_timestamp(&sms->SMS[i].SMSCTime)) {
       printf("\"smsc_timestamp\": false, ");
     } else {
-      char *smsc_timestamp = encode_timestamp_utf8(&sms->SMS[i].SMSCTime);
+      char *smsc_timestamp =
+        encode_timestamp_utf8(&sms->SMS[i].SMSCTime);
+
       printf("\"smsc_timestamp\": \"%s\", ", smsc_timestamp);
       free(smsc_timestamp);
     }
@@ -569,8 +574,11 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
       }
       case SMS_Coding_Default_No_Compression:
       case SMS_Coding_Unicode_No_Compression: {
+
+        char *text =
+          utf16be_encode_json_utf8((char *) sms->SMS[i].Text);
+
         printf("\"encoding\": \"utf-8\", ");
-        char *text = utf16be_encode_json_utf8(sms->SMS[i].Text);
         printf("\"content\": \"%s\", ", text);
         free(text);
         break;
@@ -612,7 +620,8 @@ int print_messages_json_utf8(gammu_state_t *s) {
 /**
  * @name action_retrieve_messages:
  */
-int action_retrieve_messages(gammu_state_t **sp, int argc, char *argv[]) {
+int action_retrieve_messages(gammu_state_t **sp,
+                             int argc, char *argv[]) {
 
   int rv = 0;
   
@@ -839,7 +848,8 @@ boolean_t delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
 /**
  * @name action_delete_messages:
  */
-int action_delete_messages(gammu_state_t **sp, int argc, char *argv[]) {
+int action_delete_messages(gammu_state_t **sp,
+                           int argc, char *argv[]) {
 
   int rv = 0;
   bitfield_t *bf = NULL;
@@ -972,8 +982,10 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
         printf("\"result\": \"error\", ");
         printf("\"error\": \"%s\", ", t->parts[i].err); /* const */
       } else {
+        char *text =
+          utf16be_encode_json_utf8((char *) m->SMS[i].Text);
+
         printf("\"result\": \"success\", ");
-        char *text = utf16be_encode_json_utf8(m->SMS[i].Text);
         printf("\"content\": \"%s\", ", text);
         free(text);
       }
@@ -1013,7 +1025,8 @@ static void _message_transmit_callback(GSM_StateMachine *sm,
 /**
  * @name action_send_messages:
  */
-int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
+int action_send_messages(gammu_state_t **sp,
+                         int argc, char *argv[]) {
 
   int rv = 0;
   char **argp = &argv[1];
@@ -1037,14 +1050,9 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
   }
 
   /* Allocate */
-  smsc_t *smsc =
-    (smsc_t *) allocate(sizeof(*smsc));
-
-  multimessage_t *sms =
-    (multimessage_t *) allocate(sizeof(*sms));
-
-  multimessage_info_t *info =
-    (multimessage_info_t *) allocate(sizeof(*info));
+  smsc_t *smsc = allocate(sizeof(*smsc));
+  multimessage_t *sms = allocate(sizeof(*sms));
+  multimessage_info_t *info = allocate(sizeof(*info));
 
   /* Find SMSC number */
   smsc->Location = 1;
@@ -1073,14 +1081,15 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     GSM_Debug_Info *debug = GSM_GetGlobalDebug();
 
     /* Destination phone number */
-    utf8_length_info_t nl;
     char *sms_destination_number = *argp++;
-    utf8_string_length(sms_destination_number, &nl);
+
+    string_info_t nsi;
+    utf8_string_info(sms_destination_number, &nsi);
 
     /* Check size of phone number:
         We'll be decoding this in to a fixed-sized buffer. */
 
-    if (nl.symbols > GSM_MAX_NUMBER_LENGTH) {
+    if (nsi.bytes > GSM_MAX_NUMBER_LENGTH) {
       status.err = "Phone number is too long";
       goto cleanup_transmit_status;
     }
@@ -1095,26 +1104,25 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
     }
 
     /* UTF-8 message content */
-    utf8_length_info_t ml;
     char *sms_message = *argp++;
-    utf8_string_length(sms_message, &ml);
+
+    string_info_t msi;
+    utf8_string_info(sms_message, &msi);
 
     /* Convert message from UTF-8 to UTF-16-BE:
         Every symbol is two bytes long; the string is then
         terminated by a single 2-byte UTF-16 null character. */
 
-    unsigned char *sms_message_utf16be =
-      (unsigned char *) allocate_array(2, ml.symbols, 1);
-
-    DecodeUTF8(sms_message_utf16be, sms_message, ml.bytes);
+    char *sms_message_utf16be = allocate_array(2, msi.units, 1);
+    DecodeUTF8((uint8_t *) sms_message_utf16be, sms_message, msi.bytes);
 
     /* Prepare message info structure:
         This information is used to encode the possibly-multipart SMS. */
 
     info->Class = 1;
     info->EntriesNum = 1;
-    info->Entries[0].Buffer = sms_message_utf16be;
     info->Entries[0].ID = SMS_ConcatenatedTextLong;
+    info->Entries[0].Buffer = (uint8_t *) sms_message_utf16be;
     info->UnicodeCoding = !utf16be_is_gsm_string(sms_message_utf16be);
 
     if ((s->err = GSM_EncodeMultiPartSMS(debug, info, sms)) != ERR_NONE) {
@@ -1137,7 +1145,7 @@ int action_send_messages(gammu_state_t **sp, int argc, char *argv[]) {
            This is a fixed-size buffer; size was already checked above. */
 
       CopyUnicodeString(sms->SMS[i].SMSC.Number, smsc->Number);
-      DecodeUTF8(sms->SMS[i].Number, sms_destination_number, nl.bytes);
+      DecodeUTF8(sms->SMS[i].Number, sms_destination_number, nsi.bytes);
 
       /* Transmit a single message part */
       if ((s->err = GSM_SendSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {

@@ -32,20 +32,112 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <iconv.h>
 #include <gammu.h>
 
+#include "types.h"
 #include "allocate.h"
 #include "encoding.h"
 
 /** --- **/
 
 /**
- * @name utf16be_string_length:
+ * @name utf16_surrogate_first:
  */
-size_t utf16be_string_length(const unsigned char *s) {
+const uint16_t utf16_surrogate_first = 0xd800;
 
-  /* FIXME: Replace this */
-  return UnicodeLength(s);
+/**
+ * @name utf16_surrogate_middle:
+ */
+const uint16_t utf16_surrogate_middle = 0xdc00;
+
+/**
+ * @name utf16_surrogate_last:
+ */
+const uint16_t utf16_surrogate_last = 0xdfff;
+
+/**
+ * @name utf16be_string_info:
+ */
+boolean_t utf16be_string_info(const char *s, string_info_t *i) {
+
+  const char *p = s;
+  boolean_t in_surrogate = FALSE;
+
+  #define record_encoding_error(i, e) \
+    do { \
+      if ((i)->error == D_ERR_NONE) { \
+        (i)->error = (e); \
+        (i)->error_offset = (i)->bytes; \
+      } \
+    } while (0)
+
+  i->bytes = 0;
+  i->units = 0;
+  i->symbols = 0;
+
+  i->error_offset = 0;
+  i->error = D_ERR_NONE;
+
+  for (;;) {
+
+    /* Terminator */
+    if (p[0] == '\0') {
+      break;
+    }
+
+    /* Partial character */
+    if (p[1] == '\0') {
+      record_encoding_error(i, D_ERR_PARTIAL_UNIT);
+      i->bytes++;
+      break;
+    }
+
+    /* Reassemble UTF-16 character */
+    uint16_t v = (((uint16_t) p[0] << 8) | (uint16_t) p[1]);
+
+    /* Handle surrogate pairs */
+    if (!in_surrogate) {
+
+      if (v < utf16_surrogate_first || v > utf16_surrogate_last) {
+        /* Regular character */
+        i->symbols++;
+      } else {
+        if (v < utf16_surrogate_middle) {
+          /* Lead surrogate */
+          in_surrogate = TRUE;
+        } else {
+          /* Unexpected trailing surrogate */
+          record_encoding_error(i, D_ERR_UNEXPECTED_SURROGATE);
+        }
+      }
+
+    } else {
+
+      /* Surrogate pair will end */
+      in_surrogate = FALSE;
+
+      if (v >= utf16_surrogate_middle && v <= utf16_surrogate_last) {
+        /* Trailing surrogate */
+        i->symbols++;
+      } else {
+        /* Missing trailing surrogate */
+        record_encoding_error(i, D_ERR_UNMATCHED_SURROGATE);
+      }
+
+    }
+
+    /* Next */
+    p += 2;
+    i->units++;
+    i->bytes += 2;
+  }
+
+  if (in_surrogate) {
+    record_encoding_error(i, D_ERR_UNMATCHED_SURROGATE);
+  }
+
+  return TRUE;
 };
 
 /**
@@ -54,23 +146,26 @@ size_t utf16be_string_length(const unsigned char *s) {
  *   buffer, making it suitable for output as a single utf-8
  *   JSON string. The caller must free the returned string.
  */
-char *utf16be_encode_json_utf8(const unsigned char *s) {
+char *utf16be_encode_json_utf8(const char *s) {
 
   unsigned int i, j = 0;
-  size_t ul = utf16be_string_length(s);
+
+  string_info_t si;
+  utf16be_string_info(s, &si);
 
   /* Worst-case UTF-16-BE string allocation:
    *  Original length plus null terminator; two bytes for each
    *  character; every character escaped with a UTF-16 backslash. */
 
-  unsigned char *b =
-    (unsigned char *) allocate_array(2 * 2, ul, 1);
+  char *b = allocate_array(2 * 2, si.units, 1);
 
-  for (i = 0; i < ul; ++i) {
-    unsigned char msb = s[2 * i], lsb = s[2 * i + 1];
+  for (i = 0; i < si.units; ++i) {
+
+    char msb = s[2 * i];
+    char lsb = s[2 * i + 1];
 
     if (msb == '\0') {
-      unsigned char escape = '\0';
+      char escape = '\0';
 
       switch (lsb) {
         case '\r':
@@ -106,10 +201,11 @@ char *utf16be_encode_json_utf8(const unsigned char *s) {
   /* Worst-case UTF-8:
    *  Four bytes per character (see RFC3629) plus null terminator. */
 
-  ul = utf16be_string_length(b);
-  char *rv = (char *) allocate_array(4, ul, 1);
+  utf16be_string_info(b, &si);
 
-  EncodeUTF8(rv, b);
+  char *rv = allocate_array(4, si.units, 1);
+  EncodeUTF8(rv, (uint8_t *) b);
+
   free(b);
 
   return rv;
@@ -187,11 +283,12 @@ boolean_t utf16be_is_gsm_codepoint(uint8_t msb, uint8_t lsb) {
  *   the GSM default alphabet. The input string should be terminated
  *   by the UTF-16-BE null character (i.e. two null bytes).
  */
-boolean_t utf16be_is_gsm_string(const unsigned char *s) {
+boolean_t utf16be_is_gsm_string(const char *s) {
 
-  size_t ul = utf16be_string_length(s);
+  string_info_t si;
+  utf16be_string_info(s, &si);
 
-  for (size_t i = 0; i < ul; ++i) {
+  for (size_t i = 0; i < si.units; ++i) {
     if (!utf16be_is_gsm_codepoint(s[2 * i], s[2 * i + 1])) {
       return FALSE;
     }
@@ -201,24 +298,30 @@ boolean_t utf16be_is_gsm_string(const unsigned char *s) {
 }
 
 /**
- * @name utf8_string_length:
+ * @name utf8_string_info:
  */
-utf8_length_info_t *utf8_string_length(const char *str,
-                                       utf8_length_info_t *i) {
+boolean_t utf8_string_info(const char *str, string_info_t *i) {
+
   const char *p = str;
-  unsigned int bytes = 0, symbols = 0;
+  size_t bytes_processed;
+
+  i->units = 0;
+  i->bytes = 0;
+  i->symbols = 0;
 
   while (*p++) {
+
     if ((*p & 0xc0) != 0x80) {
-      symbols++;
+      i->symbols++;
     }
-    bytes++;
+
+    i->bytes++;
+    i->units++;
+
+    bytes_processed++;
   }
 
-  i->bytes = bytes;
-  i->symbols = symbols;
-
-  return i;
+  return TRUE;
 }
 
 /* vim: set ts=4 sts=2 sw=2 expandtab: */

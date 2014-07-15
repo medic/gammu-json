@@ -54,12 +54,12 @@
 /**
  * @name bitfield_create:
  */
-bitfield_t *bitfield_create(unsigned int bits) {
+bitfield_t *bitfield_create(size_t bits) {
 
-  unsigned int size = bits + 1; /* One-based */
-  unsigned int cells = (size / bitfield_cell_width);
+  size_t size = bits + 1; /* One-based */
+  size_t cells = (size / bitfield_cell_width);
 
-  bitfield_t *rv = (bitfield_t *) allocate(sizeof(*rv));
+  bitfield_t *rv = allocate(sizeof(*rv));
 
   if (size % bitfield_cell_width) {
     cells++;
@@ -67,7 +67,7 @@ bitfield_t *bitfield_create(unsigned int bits) {
 
   rv->n = bits;
   rv->total_set = 0;
-  rv->data = (uint8_t *) allocate_array(bitfield_cell_width, cells, 0);
+  rv->data = allocate_array(bitfield_cell_width, cells, 0);
 
   return rv;
 }
@@ -89,14 +89,14 @@ void bitfield_destroy(bitfield_t *bf) {
  *   addressing, as long as you remain consistent for each instance
  *   of a bitfield_t.
  */
-boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
+boolean_t bitfield_test(bitfield_t *bf, size_t bit) {
 
   if (bit > bf->n) {
     return FALSE;
   }
 
-  unsigned long cell = (bit / bitfield_cell_width);
-  unsigned long offset = (bit % bitfield_cell_width);
+  size_t cell = (bit / bitfield_cell_width);
+  size_t offset = (bit % bitfield_cell_width);
 
   return (bf->data[cell] & (1 << offset));
 }
@@ -105,21 +105,20 @@ boolean_t bitfield_test(bitfield_t *bf, unsigned long bit) {
  * @name bitfield_set:
  *   Set the (zero-based or one-based) bit `bit` to one if `value` is
  *   true, otherwise set the bit to zero. Returns true on success, false
- *   if the bit `bit` is out of range for this particular bitfield.  You
+ *   if the bit `bit` is out of range for this particular bitfield. You
  *   may use either zero-based addressing or one-based addressing, as
  *   long as you remain consistent for each instance of a bitfield_t.
  */
-boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t
-        value) {
+boolean_t bitfield_set(bitfield_t *bf, size_t bit, boolean_t value) {
 
   if (bit > bf->n) {
     return FALSE;
   }
 
-  unsigned long cell = (bit / bitfield_cell_width);
-  unsigned long offset = (bit % bitfield_cell_width);
+  size_t cell = (bit / bitfield_cell_width);
+  size_t offset = (bit % bitfield_cell_width);
 
-  int prev_value = (
+  unsigned int prev_value = (
     (bf->data[cell] & (1 << offset)) != 0
   );
 
@@ -143,10 +142,10 @@ boolean_t bitfield_set(bitfield_t *bf, unsigned long bit, boolean_t
  */
 boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]) {
 
-  for (unsigned int i = 0; argv[i] != NULL; i++) {
+  for (size_t i = 0; argv[i] != NULL; i++) {
 
     char *err = NULL;
-    unsigned long n = strtoul(argv[i], &err, 10);
+    size_t n = strtoul(argv[i], &err, 10);
 
     if (err == NULL || *err != '\0') {
       return FALSE;

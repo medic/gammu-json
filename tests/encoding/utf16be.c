@@ -32,56 +32,52 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __BITFIELD_H__
-#define __BITFIELD_H__
+#include <assert.h>
+#include "encoding.h"
 
 /**
- * @name bitfield_t:
+ * @name string_info_assert:
  */
-typedef struct bitfield {
+void string_info_assert(const char *s, string_info_t expect) {
 
-  uint8_t *data;
-  unsigned int n;
-  unsigned int total_set;
+  string_info_t si;
+  utf16be_string_info(s, &si);
 
-} bitfield_t;
+  assert(si.bytes == expect.bytes);
+  assert(si.units == expect.units);
+  assert(si.symbols == expect.symbols);
+  assert(si.error == expect.error);
+  assert(si.error_offset == expect.error_offset);
+}
 
 /**
- * @name bitfield_create:
+ * @name test_string_info:
  */
-bitfield_t *bitfield_create(size_t bits);
+void test_string_info() {
+
+  const char *s = NULL;
+
+  /* U+1F62C Grimacing face, U+1F610 Neutral face */
+  s = "\xd8\x3d\xde\x2c\xd8\x3d\xde\x10\0\0";
+
+  string_info_assert(
+    s, (string_info_t) { 8, 4, 2, D_ERR_NONE, 0 }
+  );
+
+  /* Invalid surrogate: missing trailing */
+  s = "\xd8";
+
+  string_info_assert(
+    s, (string_info_t) { 1, 0, 0, D_ERR_PARTIAL_UNIT, 0 }
+  );
+}
 
 /**
- * @name bitfield_destroy:
+ * @name main:
  */
-void bitfield_destroy(bitfield_t *bf);
+int main(int argc, char *argv[]) {
 
-/**
- * @name bitfield_test:
- *   Return true if the (zero-based or one-based) bit `bit` is set.
- *   Returns true on success, false if `bit` is out of range for this
- *   bitfield. You may use either zero-based addressing or one-based
- *   addressing, as long as you remain consistent for each instance
- *   of a bitfield_t.
- */
-boolean_t bitfield_test(bitfield_t *bf, size_t bit);
-
-/**
- * @name bitfield_set:
- *   Set the (zero-based or one-based) bit `bit` to one if `value` is
- *   true, otherwise set the bit to zero. Returns true on success, false
- *   if the bit `bit` is out of range for this particular bitfield.  You
- *   may use either zero-based addressing or one-based addressing, as
- *   long as you remain consistent for each instance of a bitfield_t.
- */
-boolean_t bitfield_set(bitfield_t *bf, size_t bit, boolean_t value);
-
-/**
- * @name bitfield_set_integer_arguments:
- *   Set the Nth bit of `bf` for every string-encoded integer N in `argv`.
- */
-boolean_t bitfield_set_integer_arguments(bitfield_t *bf, char *argv[]);
-
-#endif /* __BITFIELD_H__ */
+  test_string_info();
+}
 
 /* vim: set ts=4 sts=2 sw=2 expandtab: */
