@@ -57,69 +57,6 @@ const uint16_t utf16_surrogate_middle = 0xdc00;
 const uint16_t utf16_surrogate_last = 0xdfff;
 
 /**
- * @name convert_utf8_utf16be:
- */
-char *convert_utf8_utf16be(char *s, boolean_t reverse) {
-
-  char *rv = NULL;
-  char *t1 = "UTF-16BE", *t2 = "UTF-8";
-
-  iconv_t iv = iconv_open(
-    (reverse ? t2 : t1), (reverse ? t1 : t2)
-  );
-
-  if (iv == (iconv_t) -1) {
-    goto exit;
-  }
-
-  string_info_t si;
-
-  if (reverse) {
-    utf16be_string_info(s, &si);
-  } else {
-    utf8_string_info(s, &si);
-  }
-
-  /* Allocate and check overflow:
-   *   Worst case for both UTF-8 and UTF-16 is four bytes per character.
-   *   For UTF-16, this is every character being represented by two
-   *   16-bit surrogate pairs; for UTF-8, the worst case is clamped
-   *   at four bytes by RFC 3629 (though it technically could be six). */
-
-  char *target = allocate_array(4, si.units, 1);
-  size_t target_size = (4 * si.units);
-
-  /* Perform conversion */
-  char *fp = s, *tp = target;
-  size_t in = si.bytes, out = target_size;
-  size_t lost = iconv(iv, &fp, &in, &tp, &out);
-
-  if (lost == -1) {
-    goto cleanup;
-  }
-
-  /* Find end of string */
-  size_t offset = (target_size - out);
-
-  /* Null-terminate string */
-  target[offset] = '\0';
-
-  if (!reverse) {
-    target[++offset] = '\0';
-  }
-
-  /* Success */
-  rv = target;
-
-  cleanup:
-    iconv_close(iv);
-
-  exit:
-    return rv;
-}
-
-
-/**
  * @name utf16be_string_info:
  *   Calculates the number of bytes, code units, and valid symbols
  *   in the big-endian UTF-16 string `s`. If the string contains at
@@ -389,6 +326,66 @@ boolean_t utf8_string_info(const char *str, string_info_t *i) {
   }
 
   return TRUE;
+}
+
+/**
+ * @name convert_utf8_utf16be:
+ */
+char *convert_utf8_utf16be(char *s, boolean_t reverse) {
+
+  char *rv = NULL;
+  char *t1 = "UTF-16BE", *t2 = "UTF-8";
+
+  iconv_t iv = iconv_open(
+    (reverse ? t2 : t1), (reverse ? t1 : t2)
+  );
+
+  if (iv == (iconv_t) -1) {
+    goto exit;
+  }
+
+  string_info_t si;
+
+  if (reverse) {
+    utf16be_string_info(s, &si);
+  } else {
+    utf8_string_info(s, &si);
+  }
+
+  /* Allocate and check overflow:
+   *   Worst case for UTF-8 and UTF-16 is four bytes per character.
+   *   For UTF-16, this is every character being represented by two
+   *   16-bit surrogate pairs; for UTF-8, the worst case is clamped
+   *   at four bytes by RFC 3629 (though it technically could be six). */
+
+  char *target = allocate_array(4, si.units, 1);
+  size_t target_size = (4 * si.units);
+
+  /* Perform conversion */
+  char *fp = s, *tp = target;
+  size_t in = si.bytes, out = target_size;
+  size_t lost = iconv(iv, &fp, &in, &tp, &out);
+
+  if (lost == -1) {
+    free(target);
+    goto cleanup_iconv;
+  }
+
+  /* Null-terminate string */
+  *tp = '\0';
+
+  if (!reverse) {
+    *++tp = '\0';
+  }
+
+  /* Success */
+  rv = target;
+
+  cleanup_iconv:
+    iconv_close(iv);
+
+  exit:
+    return rv;
 }
 
 /* vim: set ts=4 sts=2 sw=2 expandtab: */

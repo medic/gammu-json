@@ -211,10 +211,10 @@ static int usage() {
  */
 void print_repl_error(int err, const char *s) {
 
-  printf("{");
+  printf("{ ");
   printf(" \"result\": \"error\",");
   printf(" \"errno\": %d, \"error\": \"%s\" ", err, s);
-  printf("}\n");
+  printf(" }\n");
 }
 
 /**
@@ -678,7 +678,7 @@ void print_deletion_detail_json_utf8(message_t *sms,
  */
 void print_deletion_status_json_utf8(delete_status_t *status) {
 
-  printf("\"totals\": {");
+  printf("\"totals\": { ");
 
   if (status->requested > 0) {
     printf("\"requested\": %d, ", status->requested);
@@ -692,7 +692,7 @@ void print_deletion_status_json_utf8(delete_status_t *status) {
   printf("\"errors\": %d, ", status->errors);
   printf("\"deleted\": %d", status->deleted);
 
-  printf("}, ");
+  printf(" }, ");
 
   if (status->deleted == 0) {
     printf("\"result\": \"none\"");
@@ -833,13 +833,13 @@ boolean_t delete_selected_messages(gammu_state_t *s, bitfield_t *bf) {
   initialize_delete_status(&status);
   status.bitfield = bf;
 
-  printf("\"detail\": {");
+  printf("\"detail\": { ");
 
   boolean_t rv = for_each_message(
     s, _before_deletion_callback, (void *) &status
   );
 
-  printf("}, ");
+  printf(" }, ");
 
   /* JSON summary output */
   print_deletion_status_json_utf8(&status);
@@ -898,7 +898,7 @@ int action_delete_messages(gammu_state_t **sp,
     rv = 6; goto cleanup_delete;
   }
 
-  printf("{");
+  printf("{ ");
 
   if (!delete_selected_messages(s, bf)) {
     print_operation_error(OP_ERR_DELETE);
@@ -906,7 +906,7 @@ int action_delete_messages(gammu_state_t **sp,
   }
 
   cleanup_json:
-    printf("}\n");
+    printf(" }\n");
 
   cleanup_delete:
     if (bf) {
@@ -944,7 +944,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
     printf(", ");
   }
 
-  printf("{");
+  printf("{ ");
   printf("\"index\": %d, ", t->message_index);
 
   if (t->err != NULL) {
@@ -977,7 +977,7 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
         printf(", ");
       }
 
-      printf("{");
+      printf("{ ");
 
       if (t->parts[i].err) {
         printf("\"result\": \"error\", ");
@@ -995,13 +995,13 @@ void print_json_transmit_status(gammu_state_t *s, multimessage_t *m,
       printf("\"status\": %d, ", t->parts[i].status);
       printf("\"reference\": %d", t->parts[i].reference);
 
-      printf("}");
+      printf(" }");
     }
 
     printf("]");
   }
 
-  printf("}");
+  printf(" }");
   fflush(stdout);
 }
 
@@ -1081,16 +1081,16 @@ int action_send_messages(gammu_state_t **sp,
     GSM_ClearMultiPartSMSInfo(info);
     GSM_Debug_Info *debug = GSM_GetGlobalDebug();
 
-    /* Destination phone number */
-    char *sms_destination_number = *argp++;
+    /* Copy/convert destination phone number */
+    char *sms_destination_number = convert_utf8_utf16be(*argp++, FALSE);
 
     string_info_t nsi;
-    utf8_string_info(sms_destination_number, &nsi);
+    utf16be_string_info(sms_destination_number, &nsi);
 
     /* Check size of phone number:
         We'll be decoding this in to a fixed-sized buffer. */
 
-    if (nsi.bytes > GSM_MAX_NUMBER_LENGTH) {
+    if (nsi.units >= GSM_MAX_NUMBER_LENGTH) {
       status.err = "Phone number is too long";
       goto cleanup_transmit_status;
     }
@@ -1111,11 +1111,10 @@ int action_send_messages(gammu_state_t **sp,
         Every symbol is two bytes long; the string is then
         terminated by a single 2-byte UTF-16 null character. */
 
-    char *sms_message_utf16be =
-      convert_utf8_utf16be(sms_message, FALSE);
+    char *sms_message_utf16be = convert_utf8_utf16be(sms_message, FALSE);
 
     if (!sms_message_utf16be) {
-      status.err = "UTF-8 conversion failed";
+      status.err = "Invalid UTF-8 sequence";
       goto cleanup_transmit_status;
     }
 
@@ -1148,7 +1147,7 @@ int action_send_messages(gammu_state_t **sp,
            This is a fixed-size buffer; size was already checked above. */
 
       CopyUnicodeString(sms->SMS[i].SMSC.Number, smsc->Number);
-      DecodeUTF8(sms->SMS[i].Number, sms_destination_number, nsi.bytes);
+      CopyUnicodeString(sms->SMS[i].Number, sms_destination_number);
 
       /* Transmit a single message part */
       if ((s->err = GSM_SendSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
@@ -1178,6 +1177,7 @@ int action_send_messages(gammu_state_t **sp,
       free(sms_message_utf16be);
 
     cleanup_transmit_status:
+      free(sms_destination_number);
       print_json_transmit_status(s, sms, &status, is_start);
       is_start = FALSE;
   }
