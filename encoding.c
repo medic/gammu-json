@@ -206,7 +206,7 @@ char *utf16be_encode_json_utf8(const char *s) {
   }
 
   b[j++] = '\0';
-  b[j++] = '\0';
+  b[j] = '\0';
 
   /* Convert result to UTF-8 */
   char *rv = convert_utf8_utf16be(b, TRUE);

@@ -212,8 +212,8 @@ static int usage() {
 void print_repl_error(int err, const char *s) {
 
   printf("{ ");
-  printf(" \"result\": \"error\",");
-  printf(" \"errno\": %d, \"error\": \"%s\" ", err, s);
+  printf("\"result\": \"error\", ");
+  printf("\"errno\": %d, \"error\": \"%s\"", err, s);
   printf(" }\n");
 }
 
@@ -224,7 +224,7 @@ static void print_usage_error(usage_error_t err) {
 
   const char *s = (
     err < U_ERR_BARRIER ?
-      usage_errors[err] : "unknown or unhandled error"
+      usage_errors[err] : "Unknown or unhandled error"
   );
 
   if (app.repl) {
@@ -1177,8 +1177,8 @@ int action_send_messages(gammu_state_t **sp,
       free(sms_message_utf16be);
 
     cleanup_transmit_status:
-      free(sms_destination_number);
       print_json_transmit_status(s, sms, &status, is_start);
+      free(sms_destination_number);
       is_start = FALSE;
   }
 
@@ -1315,8 +1315,7 @@ void process_repl_commands(gammu_state_t **s, FILE *stream) {
       char **argv = NULL;
       int argc = 0, err = 0;
 
-      boolean_t rv =
-        parsed_json_to_arguments(p, &argc, &argv, &err);
+      boolean_t rv = parsed_json_to_arguments(p, &argc, &argv, &err);
 
       if (!rv) {
         print_json_validation_error(err);

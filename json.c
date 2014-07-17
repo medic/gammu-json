@@ -52,19 +52,19 @@
  * @name json_validation_errors:
  */
 static const char *const json_validation_errors[] = {
-  /* 0 */  "success; no error",
-  /* 1 */  "parse error: invalid or malformed JSON",
-  /* 2 */  "parser memory limit exceeded",
-  /* 3 */  "internal error: memory allocation failure",
-  /* 4 */  "internal error: integer value would overflow",
-  /* 5 */  "root entity must be an object",
-  /* 6 */  "property names must be strings",
-  /* 7 */  "object contains one or more incomplete key/value pairs",
-  /* 8 */  "value for the `command` property must be a string",
-  /* 9 */  "value for `arguments` property must be an array",
-  /* 10 */ "arguments must be either strings or numeric values",
-  /* 11 */ "non-string values in `arguments` must be numeric",
-  /* 12 */ "one or more required properties are missing"
+  /* 0 */  "Success; no error",
+  /* 1 */  "Parse error: invalid or malformed JSON",
+  /* 2 */  "Parser memory limit exceeded",
+  /* 3 */  "Internal error: memory allocation failure",
+  /* 4 */  "Internal error: integer value would overflow",
+  /* 5 */  "Root entity must be an object",
+  /* 6 */  "Property names must be strings",
+  /* 7 */  "Object contains one or more incomplete key/value pairs",
+  /* 8 */  "Value for the `command` property must be a string",
+  /* 9 */  "Value for `arguments` property must be an array",
+  /* 10 */ "Arguments must be either strings or numeric values",
+  /* 11 */ "Non-string values in `arguments` must be numeric",
+  /* 12 */ "One or more required properties are missing"
 };
 
 /**
@@ -231,7 +231,7 @@ boolean_t parsed_json_to_arguments(parsed_json_t *p,
   successful:
 
     /* Null-terminate */
-    rv[n + 2] = NULL;
+    rv[n + 1] = NULL;
 
     /* Return values */
     *argv = rv;
@@ -381,7 +381,7 @@ const char *json_validation_error_text(json_validation_error_t err) {
 
   return (
     (err < V_ERR_UNKNOWN) ?
-      json_validation_error_text(err) : "unknown or unhandled error"
+      json_validation_errors[err] : "Unknown or unhandled error"
   );
 }
 
