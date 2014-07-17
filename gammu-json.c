@@ -497,14 +497,14 @@ boolean_t for_each_message(gammu_state_t *s,
  */
 boolean_t print_message_json_utf8(gammu_state_t *s,
                                   multimessage_t *sms,
-                                  int is_start, void *x) {
+                                  boolean_t is_start, void *x) {
   if (!is_start) {
     printf(", ");
   }
 
   for (unsigned int i = 0; i < sms->Number; i++) {
 
-    printf("{");
+    printf("{ ");
 
     /* Modem file/location information */
     printf("\"folder\": %d, ", sms->SMS[i].Folder);
@@ -517,7 +517,7 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     printf("\"from\": \"%s\", ", from);
     free(from);
 
-    /* Phone number of telco's SMS service center */
+    /* SMS service center phone number */
     char *smsc =
       utf16be_encode_json_utf8((char *) sms->SMS[i].SMSC.Number);
 
@@ -595,7 +595,7 @@ boolean_t print_message_json_utf8(gammu_state_t *s,
     }
 
     printf("\"inbox\": %s", sms->SMS[i].InboxFolder ? "true" : "false");
-    printf("}");
+    printf(" }");
   }
 
   fflush(stdout);

@@ -54,8 +54,7 @@ typedef enum {
   D_ERR_NONE = 0,
   D_ERR_UNMATCHED_SURROGATE = 1,
   D_ERR_UNEXPECTED_SURROGATE = 2,
-  D_ERR_PARTIAL_UNIT = 3,
-  D_ERR_UNKNOWN = 4
+  D_ERR_UNKNOWN = 3
 } string_decode_error_t;
 
 /**
@@ -67,8 +66,10 @@ typedef struct string_info {
   size_t units;
   size_t symbols;
 
-  string_decode_error_t error;
   size_t error_offset;
+  size_t invalid_bytes;
+
+  string_decode_error_t error;
 
 } string_info_t;
 

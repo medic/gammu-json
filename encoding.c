@@ -58,15 +58,23 @@ const uint16_t utf16_surrogate_last = 0xdfff;
 
 /**
  * @name utf16be_string_info:
+ *   Calculates the number of bytes, code units, and valid symbols
+ *   in the big-endian UTF-16 string `s`. If the string contains at
+ *   least one invalid byte sequence, this function will record
+ *   an error type and offset for the *first* invalid byte sequence,
+ *   along with the total number of invalid-sequence bytes that were
+ *   encountered. Returns true if the string contained only valid
+ *   big-endian UTF-16 sequences; false otherwise.
  */
 boolean_t utf16be_string_info(const char *s, string_info_t *i) {
 
   const char *p = s;
   boolean_t in_surrogate = FALSE;
 
-  #define record_encoding_error(i, e) \
+  #define record_error(i, e) \
     do { \
-      if ((i)->error == D_ERR_NONE) { \
+      (i)->invalid_bytes += 2; \
+      if (!(i)->error) { \
         (i)->error = (e); \
         (i)->error_offset = (i)->bytes; \
       } \
@@ -75,26 +83,18 @@ boolean_t utf16be_string_info(const char *s, string_info_t *i) {
   i->bytes = 0;
   i->units = 0;
   i->symbols = 0;
-
   i->error_offset = 0;
+  i->invalid_bytes = 0;
   i->error = D_ERR_NONE;
 
   for (;;) {
 
-    /* Terminator */
-    if (p[0] == '\0') {
-      break;
-    }
+    /* Reassemble current UTF-16 character */
+    uint16_t v = (p[0] << 8) | (uint8_t) p[1];
 
-    /* Partial character */
-    if (p[1] == '\0') {
-      record_encoding_error(i, D_ERR_PARTIAL_UNIT);
-      i->bytes++;
-      break;
+    if (!v) {
+      goto finished;
     }
-
-    /* Reassemble UTF-16 character */
-    uint16_t v = (((uint16_t) p[0] << 8) | (uint16_t) p[1]);
 
     /* Handle surrogate pairs */
     if (!in_surrogate) {
@@ -107,14 +107,14 @@ boolean_t utf16be_string_info(const char *s, string_info_t *i) {
           /* Lead surrogate */
           in_surrogate = TRUE;
         } else {
-          /* Unexpected trailing surrogate */
-          record_encoding_error(i, D_ERR_UNEXPECTED_SURROGATE);
+          /* Unmatched lead surrogate */
+          record_error(i, D_ERR_UNEXPECTED_SURROGATE);
         }
       }
 
     } else {
 
-      /* Surrogate pair will end */
+      /* Pair complete */
       in_surrogate = FALSE;
 
       if (v >= utf16_surrogate_middle && v <= utf16_surrogate_last) {
@@ -122,22 +122,31 @@ boolean_t utf16be_string_info(const char *s, string_info_t *i) {
         i->symbols++;
       } else {
         /* Missing trailing surrogate */
-        record_encoding_error(i, D_ERR_UNMATCHED_SURROGATE);
+        record_error(i, D_ERR_UNMATCHED_SURROGATE);
+
+        /* Reparse */
+        continue;
       }
 
     }
 
-    /* Next */
+    /* Done */
     p += 2;
     i->units++;
     i->bytes += 2;
   }
 
-  if (in_surrogate) {
-    record_encoding_error(i, D_ERR_UNMATCHED_SURROGATE);
-  }
+  finished:
 
-  return TRUE;
+    if (in_surrogate) {
+      record_error(i, D_ERR_UNMATCHED_SURROGATE);
+    }
+
+    if (i->error == D_ERR_UNMATCHED_SURROGATE) {
+      i->error_offset -= 2;
+    }
+
+    return (i->invalid_bytes == 0);
 };
 
 /**

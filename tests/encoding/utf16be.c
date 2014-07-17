@@ -48,6 +48,7 @@ void string_info_assert(const char *s, string_info_t expect) {
   assert(si.symbols == expect.symbols);
   assert(si.error == expect.error);
   assert(si.error_offset == expect.error_offset);
+  assert(si.invalid_bytes == expect.invalid_bytes);
 }
 
 /**
@@ -57,18 +58,84 @@ void test_string_info() {
 
   const char *s = NULL;
 
-  /* U+1F62C Grimacing face, U+1F610 Neutral face */
+  /* U+1F62C: Grimacing Face, U+1F610: Neutral Face */
   s = "\xd8\x3d\xde\x2c\xd8\x3d\xde\x10\0\0";
 
   string_info_assert(
-    s, (string_info_t) { 8, 4, 2, D_ERR_NONE, 0 }
+    s, (string_info_t) {
+      .error = D_ERR_NONE, .error_offset = 0, 
+        .bytes = 8, .units = 4, .symbols = 2, .invalid_bytes = 0
+    }
   );
 
-  /* Invalid surrogate: missing trailing */
-  s = "\xd8";
+  /* Missing trailing surrogate */
+  s = "\xd8\0\0\0";
 
   string_info_assert(
-    s, (string_info_t) { 1, 0, 0, D_ERR_PARTIAL_UNIT, 0 }
+    s, (string_info_t) {
+      .error = D_ERR_UNMATCHED_SURROGATE, .error_offset = 0,
+        .bytes = 2, .units = 1, .symbols = 0, .invalid_bytes = 2
+    }
+  );
+
+  /* Unexpected lead surrogate */
+  s = "\xdf\x00\0\0";
+
+  string_info_assert(
+    s, (string_info_t) {
+      .error = D_ERR_UNEXPECTED_SURROGATE, .error_offset = 0,
+        .bytes = 2, .units = 1, .symbols = 0, .invalid_bytes = 2
+    }
+  );
+
+  /* Missing trailing surrogate */
+  s = "\xd8\x3d\xde\x2c\xd9\x00\xd9\x01\xd8\x3d\xde\x10\0\0";
+
+  string_info_assert(
+    s, (string_info_t) {
+      .error = D_ERR_UNMATCHED_SURROGATE, .error_offset = 4,
+        .bytes = 12, .units = 6, .symbols = 2, .invalid_bytes = 4
+    }
+  );
+
+  /* U+0020: ASCII Space */
+  s = "\x00\x20\0\0";
+
+  string_info_assert(
+    s, (string_info_t) {
+      .error = D_ERR_NONE, .error_offset = 0,
+        .bytes = 2, .units = 1, .symbols = 1, .invalid_bytes = 0
+    }
+  );
+
+  /* U+0020: Whitespace, trailing surrogate */
+  s = "\x00\x20\xdc\x00\0\0";
+
+  string_info_assert(
+    s, (string_info_t) {
+      .error = D_ERR_UNEXPECTED_SURROGATE, .error_offset = 2,
+        .bytes = 4, .units = 2, .symbols = 1, .invalid_bytes = 2
+    }
+  );
+
+  /* Missing trailing surrogate, uneven */
+  s = "\xd8\x3d\xde\x2c\xd9\x00\xd8\x3d\xde\x10\0\0\0";
+
+  string_info_assert(
+    s, (string_info_t) {
+      .error = D_ERR_UNMATCHED_SURROGATE, .error_offset = 4,
+        .bytes = 10, .units = 5, .symbols = 2, .invalid_bytes = 2
+    }
+  );
+
+  /* Garbage, U+1F62C: Grimacing Face */
+  s = "\xdf\xdc\xdf\xff\xd8\x00\xd8\x3d\xde\x2c\0\0";
+
+  string_info_assert(
+    s, (string_info_t) {
+      .error = D_ERR_UNEXPECTED_SURROGATE, .error_offset = 0, 
+        .bytes = 10, .units = 5, .symbols = 1, .invalid_bytes = 6
+    }
   );
 }
 
