@@ -57,6 +57,69 @@ const uint16_t utf16_surrogate_middle = 0xdc00;
 const uint16_t utf16_surrogate_last = 0xdfff;
 
 /**
+ * @name convert_utf8_utf16be:
+ */
+char *convert_utf8_utf16be(char *s, boolean_t reverse) {
+
+  char *rv = NULL;
+  char *t1 = "UTF-16BE", *t2 = "UTF-8";
+
+  iconv_t iv = iconv_open(
+    (reverse ? t2 : t1), (reverse ? t1 : t2)
+  );
+
+  if (iv == (iconv_t) -1) {
+    goto exit;
+  }
+
+  string_info_t si;
+
+  if (reverse) {
+    utf16be_string_info(s, &si);
+  } else {
+    utf8_string_info(s, &si);
+  }
+
+  /* Allocate and check overflow:
+   *   Worst case for both UTF-8 and UTF-16 is four bytes per character.
+   *   For UTF-16, this is every character being represented by two
+   *   16-bit surrogate pairs; for UTF-8, the worst case is clamped
+   *   at four bytes by RFC 3629 (though it technically could be six). */
+
+  char *target = allocate_array(4, si.units, 1);
+  size_t target_size = (4 * si.units);
+
+  /* Perform conversion */
+  char *fp = s, *tp = target;
+  size_t in = si.bytes, out = target_size;
+  size_t lost = iconv(iv, &fp, &in, &tp, &out);
+
+  if (lost == -1) {
+    goto cleanup;
+  }
+
+  /* Find end of string */
+  size_t offset = (target_size - out);
+
+  /* Null-terminate string */
+  target[offset] = '\0';
+
+  if (!reverse) {
+    target[++offset] = '\0';
+  }
+
+  /* Success */
+  rv = target;
+
+  cleanup:
+    iconv_close(iv);
+
+  exit:
+    return rv;
+}
+
+
+/**
  * @name utf16be_string_info:
  *   Calculates the number of bytes, code units, and valid symbols
  *   in the big-endian UTF-16 string `s`. If the string contains at
@@ -162,11 +225,12 @@ char *utf16be_encode_json_utf8(const char *s) {
   string_info_t si;
   utf16be_string_info(s, &si);
 
-  /* Worst-case UTF-16-BE string allocation:
-   *  Original length plus null terminator; two bytes for each
-   *  character; every character escaped with a UTF-16 backslash. */
+  /* Worst-case UTF-16 string allocation:
+   *  Original length plus null terminator. Four bytes for each
+   *  character assuming the worst case of 100% surrogate pairs;
+   *  every character escaped with a two byte UTF-16 backslash. */
 
-  char *b = allocate_array(2 * 2, si.units, 1);
+  char *b = allocate_array(6, si.units, 1);
 
   for (i = 0; i < si.units; ++i) {
 
@@ -207,16 +271,10 @@ char *utf16be_encode_json_utf8(const char *s) {
   b[j++] = '\0';
   b[j++] = '\0';
 
-  /* Worst-case UTF-8:
-   *  Four bytes per character (see RFC3629) plus null terminator. */
-
-  utf16be_string_info(b, &si);
-
-  char *rv = allocate_array(4, si.units, 1);
-  EncodeUTF8(rv, (uint8_t *) b);
+  /* Convert result to UTF-8 */
+  char *rv = convert_utf8_utf16be(b, TRUE);
 
   free(b);
-
   return rv;
 }
 
@@ -312,22 +370,22 @@ boolean_t utf16be_is_gsm_string(const char *s) {
 boolean_t utf8_string_info(const char *str, string_info_t *i) {
 
   const char *p = str;
-  size_t bytes_processed;
 
   i->units = 0;
   i->bytes = 0;
   i->symbols = 0;
+  i->error_offset = 0;
+  i->invalid_bytes = 0;
+  i->error = D_ERR_NONE;
 
   while (*p++) {
 
     if ((*p & 0xc0) != 0x80) {
       i->symbols++;
+      i->units++;
     }
 
     i->bytes++;
-    i->units++;
-
-    bytes_processed++;
   }
 
   return TRUE;

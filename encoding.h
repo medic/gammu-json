@@ -74,6 +74,11 @@ typedef struct string_info {
 } string_info_t;
 
 /**
+ * @name convert_utf8_utf16be:
+ */
+char *convert_utf8_utf16be(char *utf8, boolean_t reverse);
+
+/**
  * @name utf16be_string_info:
  */
 boolean_t utf16be_string_info(const char *s, string_info_t *i);

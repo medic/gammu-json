@@ -137,6 +137,17 @@ void test_string_info() {
         .bytes = 10, .units = 5, .symbols = 1, .invalid_bytes = 6
     }
   );
+
+  /* Two lead surrogates, U+1F62C: Grimacing Face */
+  s = "\xd8\x00\xd8\x00\xd8\x3d\xde\x2c\0\0";
+
+  string_info_assert(
+    s, (string_info_t) {
+      .error = D_ERR_UNMATCHED_SURROGATE, .error_offset = 0, 
+        .bytes = 8, .units = 4, .symbols = 1, .invalid_bytes = 4
+    }
+  );
+
 }
 
 /**

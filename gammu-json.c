@@ -42,6 +42,7 @@
 #include <ctype.h>
 #include <inttypes.h>
 
+#include <iconv.h>
 #include <gammu.h>
 #include <jsmn.h>
 
@@ -1106,15 +1107,17 @@ int action_send_messages(gammu_state_t **sp,
     /* UTF-8 message content */
     char *sms_message = *argp++;
 
-    string_info_t msi;
-    utf8_string_info(sms_message, &msi);
-
     /* Convert message from UTF-8 to UTF-16-BE:
         Every symbol is two bytes long; the string is then
         terminated by a single 2-byte UTF-16 null character. */
 
-    char *sms_message_utf16be = allocate_array(2, msi.units, 1);
-    DecodeUTF8((uint8_t *) sms_message_utf16be, sms_message, msi.bytes);
+    char *sms_message_utf16be =
+      convert_utf8_utf16be(sms_message, FALSE);
+
+    if (!sms_message_utf16be) {
+      status.err = "UTF-8 conversion failed";
+      goto cleanup_transmit_status;
+    }
 
     /* Prepare message info structure:
         This information is used to encode the possibly-multipart SMS. */
