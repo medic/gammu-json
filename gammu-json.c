@@ -1084,6 +1084,11 @@ int action_send_messages(gammu_state_t **sp,
     /* Copy/convert destination phone number */
     char *sms_destination_number = convert_utf8_utf16be(*argp++, FALSE);
 
+    if (!sms_destination_number) {
+      status.err = "Invalid UTF-8 sequence in destination number";
+      goto cleanup_end;
+    }
+
     string_info_t nsi;
     utf16be_string_info(sms_destination_number, &nsi);
 
@@ -1147,7 +1152,10 @@ int action_send_messages(gammu_state_t **sp,
            This is a fixed-size buffer; size was already checked above. */
 
       CopyUnicodeString(sms->SMS[i].SMSC.Number, smsc->Number);
-      CopyUnicodeString(sms->SMS[i].Number, sms_destination_number);
+
+      CopyUnicodeString(
+        sms->SMS[i].Number, (unsigned char *) sms_destination_number
+      );
 
       /* Transmit a single message part */
       if ((s->err = GSM_SendSMS(s->sm, &sms->SMS[i])) != ERR_NONE) {
@@ -1179,6 +1187,8 @@ int action_send_messages(gammu_state_t **sp,
     cleanup_transmit_status:
       print_json_transmit_status(s, sms, &status, is_start);
       free(sms_destination_number);
+
+    cleanup_end:
       is_start = FALSE;
   }
 
