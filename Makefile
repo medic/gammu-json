@@ -11,6 +11,8 @@ PKG_CONFIG = PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:${PKG_CONFIG_PATH}" pkg-config
 GAMMU_LDFLAGS := $(shell $(PKG_CONFIG) --libs gammu 2>/dev/null)
 GAMMU_CFLAGS := $(shell $(PKG_CONFIG) --cflags gammu 2>/dev/null)
 
+SRC_FILES := allocate.c bitfield.c json.c encoding.c gammu-json.c
+
 ifeq ($(filter clean distclean, $(MAKECMDGOALS)),)
   ifeq ($(and $(GAMMU_LDFLAGS), $(GAMMU_CFLAGS)),)
     $(info Failure while running the pkg-config utility:)
@@ -23,6 +25,7 @@ ifeq ($(filter clean distclean, $(MAKECMDGOALS)),)
   endif
 endif
 
+
 all: build-gammu-json
 
 build-dependencies:
@@ -32,7 +35,7 @@ clean-dependencies:
 	cd dependencies && $(MAKE) clean
 
 build-gammu-json: build-dependencies
-	gcc -o gammu-json gammu-json.c \
+	gcc -o gammu-json $(SRC_FILES) \
 		-Idependencies/jsmn -Ldependencies/jsmn -ljsmn \
 		$(C99) $(CFLAGS) $(LDFLAGS) $(GAMMU_CFLAGS) $(GAMMU_LDFLAGS)
 
