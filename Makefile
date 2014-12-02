@@ -1,8 +1,8 @@
 
 C99 = -std=c99
 
-LDFLAGS := -lm
-CFLAGS := -D_FORTIFY_SOURCE=2 -Wall -Os -g
+LDFLAGS += -lm
+CFLAGS += -D_FORTIFY_SOURCE=2 -Wall -Os -g
 
 PREFIX ?= /usr
 PKG_CONFIG_PATH = ${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig
@@ -12,6 +12,10 @@ GAMMU_LDFLAGS := $(shell $(PKG_CONFIG) --libs gammu 2>/dev/null)
 GAMMU_CFLAGS := $(shell $(PKG_CONFIG) --cflags gammu 2>/dev/null)
 
 SRC_FILES := allocate.c bitfield.c json.c encoding.c gammu-json.c
+
+ifeq ($(shell uname -s),Darwin)
+  LDFLAGS += -liconv
+endif
 
 ifeq ($(filter clean distclean, $(MAKECMDGOALS)),)
   ifeq ($(and $(GAMMU_LDFLAGS), $(GAMMU_CFLAGS)),)
