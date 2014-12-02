@@ -14,7 +14,7 @@ GAMMU_CFLAGS := $(shell $(PKG_CONFIG) --cflags gammu 2>/dev/null)
 SRC_FILES := allocate.c bitfield.c json.c encoding.c gammu-json.c
 
 ifeq ($(shell uname -s),Darwin)
-  LDFLAGS += -liconv
+  LDFLAGS_EXTRA += -liconv
 endif
 
 ifeq ($(filter clean distclean, $(MAKECMDGOALS)),)
@@ -41,7 +41,8 @@ clean-dependencies:
 build-gammu-json: build-dependencies
 	gcc -o gammu-json $(SRC_FILES) \
 		-Idependencies/jsmn -Ldependencies/jsmn -ljsmn \
-		$(C99) $(CFLAGS) $(LDFLAGS) $(GAMMU_CFLAGS) $(GAMMU_LDFLAGS)
+		$(C99) $(CFLAGS) $(CFLAGS_EXTRA) $(LDFLAGS) \
+		$(LDFLAGS_EXTRA) $(GAMMU_CFLAGS) $(GAMMU_LDFLAGS)
 
 clean: clean-dependencies
 	rm -f gammu-json
