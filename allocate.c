@@ -63,7 +63,7 @@ void *allocate(size_t size) {
   void *rv = malloc(size);
 
   if (!rv) {
-    fatal(127, "allocation failure; couldn't allocate %lu bytes", size);
+    fatal(127, "allocation failure; couldn't allocate %zu bytes", size);
   }
 
   memset(rv, '\0', size);
@@ -76,10 +76,10 @@ void *allocate(size_t size) {
 void *allocate_array(size_t size, size_t items, size_t extra) {
 
   const char *multiplication_message =
-    "allocation failure; multiplication would overflow (%lu * %lu)";
+    "allocation failure; multiplication would overflow (%zu * %zu)";
 
   const char *addition_message =
-    "allocation failure; addition would overflow (%lu + %lu)";
+    "allocation failure; addition would overflow (%zu + %zu)";
 
   if (multiplication_will_overflow(size, items)) {
     fatal(126, multiplication_message, size, items);
@@ -107,7 +107,7 @@ void *reallocate(void *p, size_t size) {
   void *rv = realloc(p, size);
 
   if (!rv) {
-    warn("reallocation failure; couldn't enlarge region to %lu bytes", size);
+    warn("reallocation failure; couldn't enlarge region to %zu bytes", size);
     return NULL;
   }
 
@@ -120,10 +120,10 @@ void *reallocate(void *p, size_t size) {
 void *reallocate_array(void *p, size_t size, size_t items, size_t extra) {
 
   const char *multiplication_message =
-    "reallocation failure; multiplication would overflow (%lu * %lu)";
+    "reallocation failure; multiplication would overflow (%zu * %zu)";
 
   const char *addition_message =
-    "reallocation failure; addition would overflow (%lu * %lu)";
+    "reallocation failure; addition would overflow (%zu * %zu)";
 
   if (multiplication_will_overflow(size, items)) {
     warn(multiplication_message, size, items);
